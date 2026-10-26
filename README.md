@@ -41,6 +41,23 @@ ENGINE_PORT=18088 DB_PATH=/tmp/beebots-paper.sqlite corepack pnpm dev
 
 Direct Node runs bind to `127.0.0.1`. The dashboard is at <http://127.0.0.1:18088/>. No `.env`, Setup flow, market key, broker account, or model key is needed.
 
+### Owner-managed bee profiles
+
+Use the owner CLI from an authorised shell. It writes version 2 profiles atomically with mode `0600`; the Compose runtime reads `/data/bee-profiles.json` from its named volume. In Docker, always give the CLI that exact volume path:
+
+```sh
+docker compose exec -u node -T engine node dist/tools/owner-bees.js --file /data/bee-profiles.json list
+docker compose exec -u node -T engine node dist/tools/owner-bees.js --file /data/bee-profiles.json create 'Clover' bizzy
+```
+
+The original `bee1`, `bee2`, and `bee3` profiles stay active with stable IDs. The runtime supports 3–16 active bees, keeps separate paper portfolios by ID, and refuses to remove a bee with an open position. Profile instruction notes are plain text; the deterministic paper chooser does not interpret them. The LAN dashboard remains read-only.
+
+### Optional local model shadow
+
+Shadow is off by default and observes deterministic decisions without changing choices, risk, portfolios, or simulated execution. The owner profile's plain-language instructions are sent as prompt data when shadow is enabled. The runtime pins the native System One endpoint to `http://127.0.0.1:18009/v1/systemone` and model ID `decider-4b-v2.1`; it accepts no endpoint override. To use a warmed, already-running host-local Decider, enable `LOCAL_SHADOW_ENABLED=true` only for a host-native engine process. Docker Compose intentionally fails closed if shadow is enabled because container loopback cannot reach the host service. Do not expose the model listener beyond host loopback. A Docker model path needs a separately reviewed private-network design.
+
+Shadow accepts at most three in-flight requests, queues active bee IDs fairly, paces each bee to one request per minute, and times out each request after 12 seconds. Outcomes are stored separately from decisions and orders, with history bounded to 10,000 rows. This is a comparison tool; completing deployment acceptance still requires the host-side model and runtime gates in [Phase 1.7 status](docs/phase17/STATUS.md).
+
 ## Local checks
 
 ```sh
@@ -53,8 +70,6 @@ docker compose config
 
 See [Phase 1 design and boundaries](docs/local-lab/PHASE1.md) and [implementation status](docs/local-lab/PHASE1-STATUS.md) for current details and validation outcomes.
 
-## Later phases
+## Phase status
 
-Historical backtesting with realistic execution, forex and share feeds, a local model interface, and dynamic bee counts or reinforcement learning are outside Phase 1. The future direction is recorded in [Phase 1 design](docs/local-lab/PHASE1.md).
-
-A local language model has only been discussed as a recommendation for a separately approved future change. Phase 1 keeps the existing deterministic code chooser and does not connect to LM Studio or any model service.
+See [Phase 1.6 runtime status](docs/phase16/RUNTIME-STATUS.md) for owner-managed bees and [Phase 1.7 integration status](docs/phase17/STATUS.md) for the local shadow gates. The LAN dashboard stays read-only and paper-only.

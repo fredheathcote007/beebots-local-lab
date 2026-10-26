@@ -10,6 +10,7 @@ import { liveRules } from "./lab/brain.js";
 import { LabStore } from "./lab/store.js";
 import { SimExecutor } from "./exec/executor.js";
 import { Jev } from "./jev.js";
+import { LocalShadow } from "./local-shadow.js";
 import { log, setLogLevel } from "./log.js";
 import { MarketFeed } from "./market/data.js";
 import { createPublicApi } from "./okx/public.js";
@@ -92,6 +93,10 @@ async function main() {
   // Today's chooser spend survives a restart: the decisions' recorded cost, or the reservation ledger (which also holds
   // calls a restart cut off, at their worst case), whichever is higher.
   const jev = new Jev({ ...cfg.jev, spentTodayUsd: Math.max(db.jevSpendSince(startOfDay), db.chooserSpendSince(startOfDay)), ledger: db });
+  const shadow = new LocalShadow({ enabled: cfg.localShadow.enabled, maxMarketAgeMs: 3 * cfg.dataRefreshMs + 30_000, onRecord: (row) => {
+    db.insertShadowDecision({ bee: row.bee, ts: row.ts, marketTs: row.marketTs, model: row.model, choice: row.choice, probabilities: row.probabilities, baselineChoice: row.baselineChoice, status: row.status, reason: row.reason, latencyMs: row.latencyMs });
+    log.info("local shadow outcome", { bee: row.bee, status: row.status, ...(row.reason ? { reason: row.reason } : {}), latencyMs: row.latencyMs });
+  } });
 
   // `deploy/close.sh` drops this file into the data volume to end the experiment cleanly (see Engine.windDown).
   const closeFlag = join(dirname(cfg.dbPath), `close-${cfg.mode}`);
@@ -105,7 +110,7 @@ async function main() {
   // The Beekeeper's rewrites (rules text + coins per bee) live in the engine DB and apply on the next tick.
   const labStore = new LabStore(db);
   // Previous Beekeeper integrations are dormant in this local-only runtime.
-  engine = new Engine({ cfg, db, feed, jev, exec, bus, alerts, closeRequested: () => existsSync(closeFlag), takeResumeRequest, lab: labStore });
+  engine = new Engine({ cfg, db, feed, jev, shadow, exec, bus, alerts, closeRequested: () => existsSync(closeFlag), takeResumeRequest, lab: labStore });
   await engine.start();
 
 
