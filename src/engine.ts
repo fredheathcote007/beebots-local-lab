@@ -10,7 +10,8 @@ import type { Db } from "./db.js";
 import type { EventBus } from "./events.js";
 import type { Executor } from "./exec/executor.js";
 import { contractsFor, roundToLot } from "./exec/sizing.js";
-import type { DecisionSource, FallbackReason, Jev, JevAnswer, JevResult } from "./jev.js";
+import { fallbackDecide, type DecisionSource, type FallbackReason, type Jev, type JevAnswer, type JevResult } from "./jev.js";
+import type { LocalShadow } from "./local-shadow.js";
 import { applyFill, applyFunding, freshBee, mark, rollDay, sizedRiskUsd } from "./ledger.js";
 import { log } from "./log.js";
 import type { MarketFeed } from "./market/data.js";
@@ -31,6 +32,8 @@ export interface EngineDeps {
   db: Db;
   feed: MarketFeed;
   jev: Jev;
+  /** Optional shadow-only local System One provider. Never consulted for paper choices. */
+  shadow?: LocalShadow;
   exec: Executor;
   bus: EventBus;
   alerts: Alerts;
@@ -200,12 +203,18 @@ export class Engine {
       }
       const now = this.now();
       for (const id of BEES) this.markBee(id, now);
-      if (this.d.feed.lastRefreshAt === 0) return; // no market data yet
+      if (this.d.feed.lastRefreshAt === 0) {
+        for (const id of BEES) this.d.shadow?.notePaused(id, now, 0);
+        return; // no market data yet
+      }
       if (this.d.exec.kind === "sim") this.simulateFunding(now);
 
       if (this.closedAt === null && this.d.closeRequested?.()) this.beginClose(now);
       if (this.closedAt === null && this.d.takeResumeRequest?.()) await this.resumeLast(now);
-      if (this.closedAt !== null) await this.windDown(now);
+      if (this.closedAt !== null) {
+        for (const id of BEES) this.d.shadow?.notePaused(id, now, this.d.feed.lastRefreshAt);
+        await this.windDown(now);
+      }
       else await Promise.all(BEES.map((id) => this.decide(id, now).catch((err) => log.error("decision failed", { bee: id, err: safeError(err) }))));
 
       if (now - this.lastEquityAt >= EQUITY_SNAPSHOT_MS) {
@@ -274,15 +283,25 @@ export class Engine {
     const bee = this.bees[id];
     // Benched (trade cap or fee budget): the bee rides whatever it holds. Jev is not asked, because nothing it
     // chose could be acted on; only code can close the position (stop, time stop, loss stop) until 00:00 UTC.
-    if (bee.cap === "trade_cap" || bee.cap === "fee_budget") return this.decideBenched(id, now);
+    if (bee.cap === "trade_cap" || bee.cap === "fee_budget") {
+      this.d.shadow?.notePaused(id, now, this.d.feed.lastRefreshAt);
+      return this.decideBenched(id, now);
+    }
     const epoch = this.exitEpoch[id] ?? 0;
     const ctx = this.ctx(id, now);
     // Deterministic exits first (price stop, time stop, daily loss stop, retire; the profit lock and trail have already
     // moved the stop in markBee): they never wait on a remote call. Same path as a benched bee.
-    if (this.deterministicExit(id, now)) return this.decideBenched(id, now);
+    if (this.deterministicExit(id, now)) {
+      this.d.shadow?.notePaused(id, now, this.d.feed.lastRefreshAt);
+      return this.decideBenched(id, now);
+    }
     const menu = brain.menu(ctx);
     const snap = buildSnapshot(brain, ctx);
     if (brain.id === "boozy" && bee.top1.coin) snap.state.top1 = `${bee.top1.coin} x${bee.top1.streak}`;
+    if (Object.keys(menu).length > 1 && this.d.shadow) {
+      const baseline = fallbackDecide({ strategy: brain.strategy, state: snap.state, menu, convictionLabels: brain.convictionLabels, key: id });
+      this.d.shadow.submit({ bee: id, ts: now, marketTs: this.d.feed.lastRefreshAt, strategy: brain.strategy, state: snap.state, menu, convictionLabels: brain.convictionLabels, baselineChoice: baseline.choice });
+    }
 
     let jevStatus: JevStatus = "ok";
     let r: JevResult | null = null;

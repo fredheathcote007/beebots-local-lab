@@ -10,6 +10,11 @@ export { STYLES, type StyleId };
 const DEFAULT_SLOTS: Record<BeeId, StyleId> = { bee1: "bizzy", bee2: "breezy", bee3: "boozy" };
 /** Typed as the only acknowledgement that unlocks MODE=live. */
 export const LIVE_ACK_PHRASE = "I-ACCEPT-REAL-MONEY-RISK";
+/** Immutable host-native Decider endpoint and model identity; never supplied by an environment URL. */
+export const LOCAL_SHADOW_RUNTIME = Object.freeze({
+  url: "http://127.0.0.1:18009/v1/systemone",
+  model: "decider-4b-v2.1",
+});
 
 export type Mode = "dry" | "demo" | "live";
 
@@ -80,6 +85,8 @@ const EnvSchema = z.object({
   GEMINI_MIN_INTERVAL_MS: num(60_000),
   GEMINI_THINKING_LEVEL: opt,
   TYPESAFE_API_KEY: opt,
+  LOCAL_SHADOW_ENABLED: bool(false),
+  LOCAL_SHADOW_MODEL: str(LOCAL_SHADOW_RUNTIME.model),
   JEV_MODEL: str("jev-1.13.0"),
   JEV_TIMEOUT_MS: num(2000),
   JEV_DAILY_USD_CAP: num(2),
@@ -218,6 +225,7 @@ export interface Config {
     minIntervalMs: number;
     thinkingLevel?: string;
   };
+  localShadow: { enabled: boolean };
   tickMs: number;
   dataRefreshMs: number;
   okx: { site: "eea"; apiBase: string; cliTimeoutMs: number };
@@ -263,6 +271,12 @@ export class ConfigError extends Error {}
 
 /** Parse and validate the environment (plus the Setup file, if any). Throws ConfigError listing NAMES only, never values. */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env, settings: Settings | null = null): Config {
+  if (/^(1|true|yes|on)$/i.test(env.LOCAL_SHADOW_ENABLED?.trim() ?? "") && /^(1|true|yes|on)$/i.test(env.PAPER_CONTAINER_BIND?.trim() ?? "")) {
+    throw new ConfigError("LOCAL_SHADOW_ENABLED requires a host-native engine; Compose loopback cannot reach the host model");
+  }
+  if (env.LOCAL_SHADOW_MODEL?.trim() && env.LOCAL_SHADOW_MODEL.trim() !== LOCAL_SHADOW_RUNTIME.model) {
+    throw new ConfigError("LOCAL_SHADOW_MODEL is pinned by the local runtime configuration");
+  }
   // This fork is permanently paper-only. Reject unsafe intent before parsing so DRY_RUN cannot mask
   // MODE=demo/live and injected credentials are never copied into Config or exposed in diagnostics.
   const unsafe: string[] = [];
@@ -351,6 +365,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, settings: Setti
             minIntervalMs: Math.max(0, e.GEMINI_MIN_INTERVAL_MS),
             ...(e.GEMINI_THINKING_LEVEL ? { thinkingLevel: e.GEMINI_THINKING_LEVEL } : {}),
           },
+    localShadow: { enabled: e.LOCAL_SHADOW_ENABLED },
     tickMs: Math.max(1000, e.TICK_MS),
     dataRefreshMs: Math.max(15_000, e.DATA_REFRESH_MS),
     okx: { site: e.OKX_SITE, apiBase: e.OKX_API_BASE.replace(/\/+$/, ""), cliTimeoutMs: e.OKX_CLI_TIMEOUT_MS },

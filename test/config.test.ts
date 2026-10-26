@@ -35,4 +35,11 @@ describe("paper-only local config", () => {
     expect(loadConfig({ NODE_ENV: "production", PAPER_CONTAINER_BIND: "true" }).server.bind).toBe("0.0.0.0");
     expect(loadConfig({ PAPER_CONTAINER_BIND: "false" }).server.bind).toBe("127.0.0.1");
   });
+
+  it("pins the host shadow model and fails closed before Compose loopback can silently miss it", () => {
+    expect(loadConfig({}).localShadow).toEqual({ enabled: false });
+    expect(() => loadConfig({ LOCAL_SHADOW_ENABLED: "true", PAPER_CONTAINER_BIND: "true" })).toThrow(/host-native engine/i);
+    expect(() => loadConfig({ LOCAL_SHADOW_MODEL: "other-model" })).toThrow(/pinned/i);
+    expect(loadConfig({ LOCAL_SHADOW_MODEL: "decider-4b-v2.1" }).localShadow.enabled).toBe(false);
+  });
 });
