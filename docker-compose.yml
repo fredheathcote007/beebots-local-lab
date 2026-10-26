@@ -1,6 +1,6 @@
-# beebots local lab: paper trading only. The dashboard binds to host loopback.
+# beebots local lab: paper trading only. The dashboard binds only to the designated LAN address.
 #
-#   docker compose up -d        then open http://127.0.0.1:8080/
+#   docker compose up -d        then open http://10.1.1.40:8080/ (including from this host)
 #   docker compose logs engine  shows what the engine is doing (Setup is open for 2 hours after it starts)
 #
 # Build both images from this checkout; this file never pulls a BeeBots runtime image.
@@ -50,7 +50,7 @@ services:
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
     ports:
-      - "127.0.0.1:${LOCAL_DASHBOARD_PORT:-8080}:80"
+      - "10.1.1.40:${LAN_DASHBOARD_PORT:-8080}:80"
     environment:
       SITE_ADDRESS: :80
     volumes:
