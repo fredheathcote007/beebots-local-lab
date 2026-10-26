@@ -40,3 +40,5 @@ An independent final Codex reviewer gave **GO for publishing a DRAFT PR**, with 
 ## Continuous validation
 
 Added a credential-free GitHub Actions `validate.yml` workflow using standard GitHub-hosted Ubuntu runners, pinned Node 22 and pnpm 10.34.5, read-only repository permissions, and bounded 15-minute jobs. Runs TypeScript, lint, unit/regression tests, engine build and dashboard build. This public repository qualifies for GitHub standard hosted-runner free use; no local runner access, privileged host/GPU, Docker socket or secrets are supplied. The workflow is an additional remote gate, **not** a substitute for the local GPU/UDS qualification.
+
+**Hosted CI validation:** after adding the workflow, both the first pull-request run (`40298133042`) and redundant push run (`40298132454`) completed successfully for typecheck, lint, 392 tests, engine and dashboard builds. To avoid duplicate runs, further branch pushes trigger PR validation only; direct pushes to main still trigger validation. The standard public-repository hosted runner needs no owner-managed machine credentials.
