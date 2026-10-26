@@ -33,8 +33,8 @@ import { loadSettings, type Settings } from "../settings.js";
  * docker-compose.yml `environment:` for the engine service. Fixed values always win; `${X:-default}` entries take the
  * env file's value when it is set, else the default. Keep in step with the compose file.
  */
-export const COMPOSE_ENGINE_FIXED: Record<string, string> = { ENGINE_BIND: "0.0.0.0", ENGINE_PORT: "8080", DB_PATH: "/data/bees-{mode}.sqlite", SETTINGS_PATH: "/data/settings.json" };
-export const COMPOSE_ENGINE_DEFAULTS: Record<string, string> = { DRY_RUN: "true", MODE: "dry", TICK_MS: "10000", JEV_DAILY_USD_CAP: "2", GEMINI_DAILY_USD_CAP: "3", BEE_START_EQUITY_USD: "333", UPDATE_CHECK: "true", HIVE_URL: "https://beebots.tech" };
+export const COMPOSE_ENGINE_FIXED: Record<string, string> = { PAPER_CONTAINER_BIND: "true", ENGINE_PORT: "8080", DB_PATH: "/data/bees-{mode}.sqlite", SETTINGS_PATH: "/data/settings.json" };
+export const COMPOSE_ENGINE_DEFAULTS: Record<string, string> = { DRY_RUN: "true", MODE: "dry", TICK_MS: "10000", BEE_START_EQUITY_USD: "333" };
 
 /** The env as the engine container sees it, from the env file alone. */
 export function composeEnv(file: Record<string, string | undefined>): Record<string, string | undefined> {

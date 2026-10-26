@@ -25,6 +25,15 @@ export interface FeedOpts {
 }
 
 const HOUR = 3_600_000;
+export const MAX_TICKER_AGE_MS = 120_000;
+const MAX_TICKER_FUTURE_MS = 30_000;
+
+function freshTickers(input: Map<string, Ticker>, now: number): Map<string, Ticker> {
+  return new Map([...input].filter(([, ticker]) =>
+    Number.isFinite(ticker.ts) && ticker.ts > 0 && now - ticker.ts <= MAX_TICKER_AGE_MS && ticker.ts - now <= MAX_TICKER_FUTURE_MS &&
+    Number.isFinite(ticker.last) && ticker.last > 0,
+  ));
+}
 
 export function computeStats(inst: Instrument, t: Ticker, c15: Candle[], c1h: Candle[]): CoinStats {
   const closes15 = c15.map((c) => c.c);
@@ -102,8 +111,12 @@ export class MarketFeed {
   }
 
   /** Every tick: one CLI call re-reads all tickers, so mark prices and spreads stay live. */
-  async refreshTickers(): Promise<void> {
-    this.tickers = await this.api.tickers();
+  async refreshTickers(now = Date.now()): Promise<void> {
+    // Keep the last known good snapshot on empty, malformed, or stale responses. Its original timestamp
+    // remains intact so the engine's risk layer can identify it as stale instead of treating it as fresh.
+    const next = freshTickers(await this.api.tickers(), now);
+    if (next.size === 0) throw new Error("public market returned no fresh tickers");
+    this.tickers = next;
     for (const s of this.stats.values()) {
       const t = this.tickers.get(s.instId);
       if (!t) continue;
@@ -124,8 +137,10 @@ export class MarketFeed {
       this.instrumentsAt = now;
     }
     const [tickers, oi] = await Promise.all([this.api.tickers(), this.api.openInterest()]);
-    this.tickers = tickers;
-    const u = gateUniverse(this.instruments.values(), tickers, {
+    const fresh = freshTickers(tickers, now);
+    if (fresh.size === 0) throw new Error("public market returned no fresh tickers");
+    this.tickers = fresh;
+    const u = gateUniverse(this.instruments.values(), fresh, {
       min24hVolUsd: this.opts.min24hVolUsd,
       spreadGateBps: this.opts.spreadGateBps,
       allowNonCrypto: this.opts.allowNonCrypto,
@@ -141,7 +156,7 @@ export class MarketFeed {
     }
 
     const trendIds = this.opts.trendCoins.map((c) => this.instIdForCoin(c)).filter((x): x is string => !!x);
-    const want = [...new Set([...this.gated, ...trendIds, ...this.heldInstIds()])].filter((id) => this.instruments.has(id) && tickers.has(id));
+    const want = [...new Set([...this.gated, ...trendIds, ...this.heldInstIds()])].filter((id) => this.instruments.has(id) && fresh.has(id));
 
     const next = new Map<string, CoinStats>();
     await Promise.all(
@@ -156,7 +171,7 @@ export class MarketFeed {
             this.api.funding(id).catch(() => null),
             this.fundingHistory(id, now),
           ]);
-          const s = computeStats(inst, tickers.get(id)!, c15, c1h);
+          const s = computeStats(inst, fresh.get(id)!, c15, c1h);
           if (funding && Number.isFinite(funding.rate)) {
             s.fundingPct = funding.rate * 100;
             s.fundingZ = fHist.length ? zScore(funding.rate, fHist) : null;
@@ -168,8 +183,8 @@ export class MarketFeed {
           next.set(id, s);
         } catch (err) {
           log.warn("market data failed for coin", { instId: id, err: safeError(err) });
-          const old = this.stats.get(id);
-          if (old) next.set(id, old);
+          // Missing candle/funding inputs produce no strategy row for this instrument. Do not
+          // refresh an old indicator snapshot into the current market timestamp.
         }
       }),
     );

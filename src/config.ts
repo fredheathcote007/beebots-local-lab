@@ -263,20 +263,31 @@ export class ConfigError extends Error {}
 
 /** Parse and validate the environment (plus the Setup file, if any). Throws ConfigError listing NAMES only, never values. */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env, settings: Settings | null = null): Config {
+  // This fork is permanently paper-only. Reject unsafe intent before parsing so DRY_RUN cannot mask
+  // MODE=demo/live and injected credentials are never copied into Config or exposed in diagnostics.
+  const unsafe: string[] = [];
+  if (env.MODE?.trim() && env.MODE.trim().toLowerCase() !== "dry") unsafe.push("MODE");
+  if (env.DRY_RUN?.trim() && !/^(1|true|yes|on)$/i.test(env.DRY_RUN.trim())) unsafe.push("DRY_RUN");
+  if (env.LIVE_ACK?.trim()) unsafe.push("LIVE_ACK");
+  if (env.OKX_API_BASE?.trim() && env.OKX_API_BASE.trim().replace(/\/+$/, "") !== "https://eea.okx.com") unsafe.push("OKX_API_BASE");
+  for (const name of Object.keys(env)) {
+    if (/^(?:BEE.*_OKX_|OKX_).*(?:KEY|SECRET|PASSPHRASE)$/i.test(name) && env[name]?.trim()) unsafe.push(name);
+  }
+  for (const name of ["GEMINI_API_KEY", "TYPESAFE_API_KEY", "OPENAI_API_KEY", "ALERT_WEBHOOK_URL", "BEEKEEPER_WEBHOOK_URL", "PUBLIC_URL", "PUBLIC_DOMAIN", "LAB_SECRET"])
+    if (env[name]?.trim()) unsafe.push(name);
+  if (settings?.geminiKey) unsafe.push("settings.geminiKey");
+  if (settings?.jevKey) unsafe.push("settings.jevKey");
+  if (settings?.openaiKey) unsafe.push("settings.openaiKey");
+  if (unsafe.length) throw new ConfigError(`Paper-only fork refuses execution settings: ${[...new Set(unsafe)].join(", ")}`);
   const parsed = EnvSchema.safeParse(env);
   if (!parsed.success) {
     const names = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`);
     throw new ConfigError(`Invalid settings:\n  ${names.join("\n  ")}`);
   }
   const e = parsed.data as Record<string, unknown> & z.infer<typeof EnvSchema>;
-  const mode: Mode = e.DRY_RUN ? "dry" : e.MODE;
+  const mode: Mode = "dry";
 
-  const geminiKey = e.GEMINI_API_KEY ?? settings?.geminiKey;
-  const jevKey = e.TYPESAFE_API_KEY ?? settings?.jevKey;
-  const provider: ChooserProvider = geminiKey ? "gemini" : jevKey ? "jev" : "code";
-  const missing: string[] = [];
-  // Paper and demo run on the code chooser when there is no key. Real money is never traded on it alone.
-  if (mode === "live" && provider === "code") missing.push("GEMINI_API_KEY (or TYPESAFE_API_KEY)");
+  const provider: ChooserProvider = "code";
   // The spend cap is only as good as the prices it counts with: a zero price makes every call free and a negative one
   // gives money back, so neither may pass. Non-numbers and Infinity were already refused by num(). Names only, never values.
   const money: Array<[string, number, "positive" | "nonnegative"]> = [
@@ -284,20 +295,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, settings: Setti
     ["GEMINI_USD_PER_MTOK", e.GEMINI_USD_PER_MTOK, "positive"],
     ["GEMINI_USD_PER_MTOK_OUT", e.GEMINI_USD_PER_MTOK_OUT, "positive"],
     ["GEMINI_TIMEOUT_MS", e.GEMINI_TIMEOUT_MS, "positive"],
-    ...(provider === "jev"
-      ? ([
-          ["JEV_DAILY_USD_CAP", e.JEV_DAILY_USD_CAP, "nonnegative"],
-          ["JEV_USD_PER_MTOK", e.JEV_USD_PER_MTOK, "positive"],
-          ["JEV_TIMEOUT_MS", e.JEV_TIMEOUT_MS, "positive"],
-        ] as Array<[string, number, "positive" | "nonnegative"]>)
-      : []),
+    ["JEV_DAILY_USD_CAP", e.JEV_DAILY_USD_CAP, "nonnegative"],
+    ["JEV_USD_PER_MTOK", e.JEV_USD_PER_MTOK, "positive"],
+    ["JEV_TIMEOUT_MS", e.JEV_TIMEOUT_MS, "positive"],
   ];
   const bad = money.filter(([, v, kind]) => !Number.isFinite(v) || (kind === "positive" ? !(v > 0) : !(v >= 0)));
   if (bad.length) {
     throw new ConfigError(`Invalid settings:\n  ${bad.map(([name, , kind]) => `${name}: must be ${kind === "positive" ? "a number above 0" : "a number, 0 or more"}`).join("\n  ")}`);
-  }
-  if (mode === "live" && e.LIVE_ACK !== LIVE_ACK_PHRASE) {
-    throw new ConfigError(`MODE=live moves real money. Set LIVE_ACK=${LIVE_ACK_PHRASE} to confirm you accept the risk, or go back to DRY_RUN=true.`);
   }
 
   if (e.MAX_LEVERAGE > 2 || e.MAX_LEVERAGE <= 0) throw new ConfigError("MAX_LEVERAGE must be in (0, 2]. Hard rule 3.");
@@ -306,9 +310,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, settings: Setti
   const everyHours = e.BEEKEEPER_EVERY_HOURS === undefined ? undefined : Number(e.BEEKEEPER_EVERY_HOURS);
   if (everyHours !== undefined && !(everyHours >= 0.25)) throw new ConfigError("BEEKEEPER_EVERY_HOURS must be a number, at least 0.25");
   if (e.PUBLIC_URL && !originOf(e.PUBLIC_URL)) throw new ConfigError("PUBLIC_URL must look like https://your-domain or http://your-server-ip (no path)");
-  // PUBLIC_DOMAIN is Caddy's site address. When it is a plain domain, the engine's public address follows from it.
-  const publicUrl = (e.PUBLIC_URL ? originOf(e.PUBLIC_URL) : null) ?? (e.PUBLIC_DOMAIN && /^[a-z0-9.-]+$/i.test(e.PUBLIC_DOMAIN) ? originOf(`https://${e.PUBLIC_DOMAIN}`) : null) ?? undefined;
-
   const slots = {} as Record<BeeId, SlotProfile>;
   BEES.forEach((id, i) => {
     const b = settings?.bees[i];
@@ -317,24 +318,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, settings: Setti
       ? { style, name: b.name, tagline: b.tagline, customImage: b.image, rules: b.rules, coins: b.coins, fromSetup: true }
       : { style, name: STYLE_INFO[style].name, tagline: STYLE_INFO[style].tagline, customImage: false, rules: "", coins: [], fromSetup: false };
   });
-
-  const creds: Partial<Record<BeeId, OkxCreds>> = {};
-  if (mode !== "dry") {
-    const infix = mode === "demo" ? "OKX_DEMO_API" : "OKX_API";
-    for (const bee of BEES) {
-      const p = bee.toUpperCase();
-      const k = e[`${p}_${infix}_KEY`] as string | undefined;
-      const s = e[`${p}_${infix}_SECRET`] as string | undefined;
-      const ph = e[`${p}_${infix}_PASSPHRASE`] as string | undefined;
-      if (!k) missing.push(`${p}_${infix}_KEY`);
-      if (!s) missing.push(`${p}_${infix}_SECRET`);
-      if (!ph) missing.push(`${p}_${infix}_PASSPHRASE`);
-      if (k && s && ph) creds[bee] = { apiKey: k, secretKey: s, passphrase: ph };
-    }
-  }
-  if (missing.length) {
-    throw new ConfigError(`MODE=${mode} needs these settings, which are blank or missing:\n  ${missing.join("\n  ")}`);
-  }
 
   const knobs = (style: StyleId): BeeKnobs => {
     const p = style.toUpperCase();
@@ -352,27 +335,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, settings: Setti
   return {
     mode,
     slots,
-    openai: { apiKey: e.OPENAI_API_KEY ?? settings?.openaiKey, textModel: e.OPENAI_TEXT_MODEL, imageModel: e.OPENAI_IMAGE_MODEL },
+    openai: { textModel: e.OPENAI_TEXT_MODEL, imageModel: e.OPENAI_IMAGE_MODEL },
     links: { sponsor: e.HOST_LINK, code: e.REPO_LINK },
-    hive: { url: e.HIVE_URL.replace(/\/+$/, "") },
-    update: { enabled: e.UPDATE_CHECK, repo: e.UPDATE_REPO, version: e.APP_VERSION },
+    hive: { url: "" },
+    update: { enabled: false, repo: e.UPDATE_REPO, version: e.APP_VERSION },
     settingsPath: e.SETTINGS_PATH,
-    jev:
-      provider === "jev"
-        ? {
+    jev: {
             provider,
-            apiKey: jevKey!,
-            model: e.JEV_MODEL,
-            timeoutMs: e.JEV_TIMEOUT_MS,
-            dailyUsdCap: e.JEV_DAILY_USD_CAP,
-            usdPerMTok: e.JEV_USD_PER_MTOK,
-            usdPerMTokOut: 0, // Jev bills input tokens only
-            minIntervalMs: 0, // Jev is cheap enough to ask every tick, as before
-          }
-        : {
-            provider,
-            apiKey: geminiKey ?? "",
-            model: e.GEMINI_MODEL,
+            apiKey: "",
+            model: "code",
             timeoutMs: e.GEMINI_TIMEOUT_MS,
             dailyUsdCap: e.GEMINI_DAILY_USD_CAP,
             usdPerMTok: e.GEMINI_USD_PER_MTOK,
@@ -399,12 +370,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, settings: Setti
     breezy: { minOpenProb: e.BREEZY_MIN_OPEN_PROB, minSizeUsd: e.BREEZY_MIN_SIZE_USD },
     bizzy: { sizeFraction: e.BIZZY_SIZE_FRACTION, universeSize: e.BIZZY_UNIVERSE_SIZE, timeStopMinutes: e.BIZZY_TIME_STOP_MINUTES },
     boozy: { candidates: e.BOOZY_CANDIDATES },
-    creds,
-    server: { port: e.ENGINE_PORT, bind: e.ENGINE_BIND },
+    creds: {},
+    server: { port: e.ENGINE_PORT, bind: env.NODE_ENV === "production" && env.PAPER_CONTAINER_BIND === "true" ? "0.0.0.0" : "127.0.0.1" },
     dbPath: e.DB_PATH.replaceAll("{mode}", mode),
     logLevel: e.LOG_LEVEL,
-    alertWebhookUrl: e.ALERT_WEBHOOK_URL,
-    keeper: { hookUrl: e.BEEKEEPER_WEBHOOK_URL, publicUrl, everyHours, rampStart: e.BEEKEEPER_RAMP_START },
-    lab: { secret: e.LAB_SECRET },
+    alertWebhookUrl: undefined,
+    keeper: { everyHours },
+    lab: {},
   };
 }

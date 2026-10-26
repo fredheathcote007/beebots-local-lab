@@ -31,7 +31,8 @@ function geminiFake(pick?: (labels: string[]) => string) {
 }
 
 async function run(opts: { spentTodayUsd?: number; pick?: (labels: string[]) => string }) {
-  const cfg = testConfig({ DRY_RUN: "true", GEMINI_API_KEY: KEY });
+  const base = testConfig();
+  const cfg = { ...base, jev: { ...base.jev, provider: "gemini" as const, apiKey: KEY, model: "gemini-4-argon" } };
   const v = view([coin("ENA", { ret24hPct: 25, ret7dPct: 43 }), coin("SUI", { ret24hPct: 12, ret7dPct: 40 })]);
   const now = NOW;
   const feed = { view: () => v, refresh: async () => {}, refreshTickers: async () => {}, get lastRefreshAt() { return now; } } as unknown as MarketFeed;

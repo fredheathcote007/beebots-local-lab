@@ -95,7 +95,15 @@ export { BeeSchema };
 
 export function loadSettings(path: string): Settings | null {
   if (!existsSync(path)) return null;
-  const parsed = SettingsSchema.safeParse(JSON.parse(readFileSync(path, "utf8")));
+  const raw: unknown = JSON.parse(readFileSync(path, "utf8"));
+  const credentialField = /(?:okx|broker).*(?:key|secret|passphrase)|(?:api.?key|secret.?key|passphrase|access.?token|gemini.?key|jev.?key|openai.?key)/i;
+  const hasCredentialField = (value: unknown): boolean => {
+    if (Array.isArray(value)) return value.some(hasCredentialField);
+    if (!value || typeof value !== "object") return false;
+    return Object.entries(value).some(([key, child]) => credentialField.test(key) || hasCredentialField(child));
+  };
+  if (hasCredentialField(raw)) throw new Error(`${path} contains credential fields that this paper-only lab does not accept. Remove them before starting.`);
+  const parsed = SettingsSchema.safeParse(raw);
   if (!parsed.success) throw new Error(`${path} is not valid (${parsed.error.issues.map((i) => i.path.join(".")).join(", ")}). Delete it and run Setup again.`);
   return parsed.data;
 }

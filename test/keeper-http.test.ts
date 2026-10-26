@@ -365,23 +365,26 @@ describe("beekeeper settings: addresses", () => {
     for (const a of ["http://203.0.113.7", "https://bees.example.com", `http://${lan(172, 32, 0, 1)}`, `http://${lan(11, 0, 0, 1)}`, "http://[2001:db8::1]"]) expect(isPrivateAddress(a)).toBe(false);
   });
 
-  it("the environment: the hook must be https, the interval at least a quarter hour, and PUBLIC_DOMAIN gives the address", () => {
-    const cfg = (env: Record<string, string>) => loadConfig({ TYPESAFE_API_KEY: "test-key", ...env }).keeper;
-    expect(cfg({})).toEqual({ hookUrl: undefined, publicUrl: undefined, everyHours: undefined, rampStart: undefined });
-    expect(cfg({ PUBLIC_DOMAIN: "bees.example.com" }).publicUrl).toBe("https://bees.example.com");
-    expect(cfg({ PUBLIC_DOMAIN: "bees.example.com", PUBLIC_URL: "http://203.0.113.7:8080/" }).publicUrl).toBe("http://203.0.113.7:8080");
-    // PUBLIC_DOMAIN is Caddy's site address: anything that is not a plain domain is simply not used
-    expect(cfg({ PUBLIC_DOMAIN: ":80" }).publicUrl).toBeUndefined();
-    expect(cfg({ BEEKEEPER_WEBHOOK_URL: HOOK, BEEKEEPER_EVERY_HOURS: "6", BEEKEEPER_RAMP_START: "2026-10-02T13:00:00Z" })).toMatchObject({ hookUrl: HOOK, everyHours: 6, rampStart: "2026-10-02T13:00:00Z" });
-    expect(() => cfg({ BEEKEEPER_WEBHOOK_URL: "http://hooks.zapier.com/x" })).toThrow(ConfigError);
-    expect(() => cfg({ BEEKEEPER_EVERY_HOURS: "0.1" })).toThrow(ConfigError);
-    expect(() => cfg({ BEEKEEPER_EVERY_HOURS: "often" })).toThrow(ConfigError);
-    expect(() => cfg({ PUBLIC_URL: "bees.example.com/x" })).toThrow(ConfigError);
-    // a config error names the setting, never its value
-    try {
-      cfg({ BEEKEEPER_WEBHOOK_URL: "http://hooks.zapier.com/secret-path" });
-    } catch (e) {
-      expect((e as Error).message).not.toContain("secret-path");
+  it("the paper-only environment rejects remote keeper settings without exposing their values", () => {
+    const defaults = loadConfig({}).keeper;
+    expect(defaults.hookUrl).toBeUndefined();
+    expect(defaults.publicUrl).toBeUndefined();
+
+    const remoteSettings: Array<[string, string]> = [
+      ["BEEKEEPER_WEBHOOK_URL", "https://hooks.example.invalid/private-secret"],
+      ["PUBLIC_URL", "https://bees.example.invalid/private-secret"],
+      ["PUBLIC_DOMAIN", "bees.example.invalid"],
+    ];
+    for (const [key, value] of remoteSettings) {
+      try {
+        loadConfig({ [key]: value });
+        throw new Error(`${key} was accepted`);
+      } catch (error) {
+        expect(error).toBeInstanceOf(ConfigError);
+        expect((error as Error).message).toContain(key);
+        expect((error as Error).message).not.toContain(value);
+        expect((error as Error).message).not.toContain("private-secret");
+      }
     }
   });
 });

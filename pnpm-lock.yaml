@@ -8,9 +8,6 @@ importers:
 
   .:
     dependencies:
-      '@okx_ai/okx-trade-cli':
-        specifier: 1.4.8
-        version: 1.4.8
       '@typesafe-ai/sdk':
         specifier: 0.6.0
         version: 0.6.0
@@ -265,11 +262,6 @@ packages:
     cpu: [x64]
     os: [linux]
     libc: [glibc]
-
-  '@okx_ai/okx-trade-cli@1.4.8':
-    resolution: {integrity: sha512-AbtzC/sRwks3faIuJHuaVo/c5SZYz6pbI9DVxV9D5GP7zouaw+O4DbQqiAHZvWesUJ0lUQhqiM5i2p9iFvW2ZQ==}
-    engines: {node: '>=18'}
-    hasBin: true
 
   '@rollup/rollup-android-arm-eabi@4.63.4':
     resolution: {integrity: sha512-I+BSHzTAhKN2n7ZwGZsegGcZjDpLqFOMAtJz/u6uFGe0pUFbq56dEHjqJV/ZUdRJtNXNxA+hREUatZBvMR3Oiw==}
@@ -1203,11 +1195,6 @@ snapshots:
 
   '@napi-rs/lzma-linux-x64-gnu@1.5.1':
     optional: true
-
-  '@okx_ai/okx-trade-cli@1.4.8':
-    dependencies:
-      undici: 6.28.1
-      yauzl: 3.4.0
 
   '@rollup/rollup-android-arm-eabi@4.63.4':
     optional: true

@@ -350,16 +350,11 @@ describe("handling of the three live open positions on 13 Oct 2026", () => {
   });
 });
 
-describe("Gemini 4 Argon config & pure-code fallback", () => {
-  it("defaults to gemini-4-argon with a $3/day spend cap and runs in dry mode with only GEMINI_API_KEY or no key", () => {
-    const cfgWithGemini = loadConfig({ GEMINI_API_KEY: "gm-test-key" });
-    expect(cfgWithGemini.mode).toBe("dry");
-    expect(cfgWithGemini.jev.model).toBe("gemini-4-argon");
-    expect(cfgWithGemini.jev.dailyUsdCap).toBe(3);
-    expect(cfgWithGemini.jev.apiKey).toBe("gm-test-key");
-
+describe("pure-code chooser baseline", () => {
+  it("uses the deterministic code chooser without a cloud key", () => {
     const cfgKeyless = loadConfig({});
     expect(cfgKeyless.mode).toBe("dry");
+    expect(cfgKeyless.jev.provider).toBe("code");
     expect(cfgKeyless.jev.apiKey).toBe("");
   });
 
