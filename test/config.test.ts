@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { LIVE_ACK_PHRASE, loadConfig } from "../src/config.js";
+import { defaultProfiles, newProfile, saveProfiles } from "../src/bee-profiles.js";
+import type { Settings } from "../src/settings.js";
 
 describe("paper-only local config", () => {
   it("defaults to a deterministic chooser, paper execution, empty credentials, and loopback", () => {
@@ -34,5 +39,30 @@ describe("paper-only local config", () => {
     expect(loadConfig({ PAPER_CONTAINER_BIND: "true" }).server.bind).toBe("127.0.0.1");
     expect(loadConfig({ NODE_ENV: "production", PAPER_CONTAINER_BIND: "true" }).server.bind).toBe("0.0.0.0");
     expect(loadConfig({ PAPER_CONTAINER_BIND: "false" }).server.bind).toBe("127.0.0.1");
+  });
+
+  it("keeps Setup taglines and portraits attached to bee IDs when profiles are reordered", () => {
+    const dir = mkdtempSync(join(tmpdir(), "bee-config-order-"));
+    try {
+      const profilesPath = join(dir, "bee-profiles.json");
+      const profiles = defaultProfiles();
+      const extra = newProfile("Clover", "bizzy");
+      profiles.profiles = [extra, profiles.profiles[2]!, profiles.profiles[0]!, profiles.profiles[1]!];
+      saveProfiles(profilesPath, profiles);
+      const settings: Settings = {
+        version: 1, acceptedRiskAt: 1, createdAt: 1,
+        bees: [
+          { name: "Bizzy", style: "bizzy", tagline: "bee one tagline", rules: "", coins: [], image: true },
+          { name: "Breezy", style: "breezy", tagline: "bee two tagline", rules: "", coins: [], image: false },
+          { name: "Boozy", style: "boozy", tagline: "bee three tagline", rules: "", coins: [], image: true },
+        ],
+      };
+      const cfg = loadConfig({ BEE_PROFILES_PATH: profilesPath }, settings);
+      expect(cfg.beeIds).toEqual([extra.id, "bee3", "bee1", "bee2"]);
+      expect(cfg.slots.bee1).toMatchObject({ tagline: "bee one tagline", customImage: true });
+      expect(cfg.slots.bee2).toMatchObject({ tagline: "bee two tagline", customImage: false });
+      expect(cfg.slots.bee3).toMatchObject({ tagline: "bee three tagline", customImage: true });
+      expect(cfg.slots[extra.id as keyof typeof cfg.slots]).toMatchObject({ tagline: "the grinder", customImage: false });
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });

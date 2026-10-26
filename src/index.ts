@@ -2,7 +2,7 @@ import { existsSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { Alerts } from "./alerts.js";
 import { BREEZY_COINS } from "./bees/breezy.js";
-import { BEES, ConfigError, loadConfig, STYLES, type Config } from "./config.js";
+import { ConfigError, loadConfig, STYLES, type Config } from "./config.js";
 import { Db } from "./db.js";
 import { Engine } from "./engine.js";
 import { EventBus } from "./events.js";
@@ -30,7 +30,7 @@ function profile(cfg: Config | null, lab?: LabStore) {
     mode: cfg?.mode ?? "dry",
     links: cfg?.links ?? null,
     bees: cfg
-      ? BEES.map((id) => {
+      ? cfg.beeIds.map((id) => {
           const s = cfg.slots[id];
           const live = liveRules(s, lab?.overlay(id) ?? null);
           return {
@@ -39,11 +39,11 @@ function profile(cfg: Config | null, lab?: LabStore) {
             tagline: s.tagline,
             style: s.style,
             styleLabel: STYLE_INFO[s.style].label,
-            rules: live.rules,
+            rules: s.instructions || s.rules || "",
             coins: live.coins,
             // A Setup-made bee only ever shows its own portrait (null = the dashboard's placeholder mark), never the
             // original bees' art, which belongs to the three official bees.
-            img: s.customImage && imagePath(cfg.settingsPath, id) ? `/bee-image/${id}` : s.fromSetup ? null : `/bees/${s.style}.jpg`,
+            img: s.customImage && imagePath(cfg.settingsPath, id) ? `/bee-image/${id}` : s.fromSetup || !["bee1", "bee2", "bee3"].includes(id) ? null : `/bees/${s.style}.jpg`,
           };
         })
       : [],
@@ -72,7 +72,7 @@ async function main() {
   const api = createPublicApi(cfg.okx.apiBase, false, createOkxPublicRest({ apiBase: cfg.okx.apiBase, timeoutMs: cfg.okx.cliTimeoutMs }));
 
   let engine: Engine | null = null;
-  const held = () => (engine ? BEES.map((id) => engine!.bees[id]?.position?.instId).filter((x): x is string => !!x) : []);
+  const held = () => (engine ? cfg.beeIds.map((id) => engine!.bees[id]?.position?.instId).filter((x): x is string => !!x) : []);
   const news = null;
   const feed = new MarketFeed(
     api,

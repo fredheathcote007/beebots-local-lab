@@ -219,6 +219,10 @@ export class Db {
     return row ? (JSON.parse(row.json) as BeeState) : null;
   }
 
+  storedBeeIds(): BeeId[] {
+    return (this.raw.prepare("SELECT bee FROM bee_state").all() as Array<{ bee: string }>).map((r) => r.bee as BeeId);
+  }
+
   insertEvent(ts: number, type: string, json: string): void {
     this.raw.prepare(`INSERT INTO events (ts, type, json) VALUES (?,?,?)`).run(ts, type, json);
   }

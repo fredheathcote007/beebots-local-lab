@@ -2,7 +2,7 @@ import { customBrain } from "./bees/custom.js";
 import { BRAINS } from "./bees/index.js";
 import { maxNotionalUsd, minutesSince, positionNotional, profitLockStop } from "./bees/common.js";
 import { coinOf, type Action, type BeeBrain, type BeeContext, type BeeState, type Position, type Side } from "./bees/types.js";
-import { BEES, chooserName, type BeeId, type Config } from "./config.js";
+import { chooserName, type BeeId, type Config } from "./config.js";
 import { liveRules } from "./lab/brain.js";
 import type { Overlay } from "./lab/store.js";
 import type { Alerts } from "./alerts.js";
@@ -134,7 +134,11 @@ export class Engine {
       this.closeAnnounced = db.getMeta("experiment_flat_at") !== null;
     }
 
-    for (const id of BEES) {
+    for (const id of db.storedBeeIds()) {
+      const stored = db.loadBee(id);
+      if (stored?.position && !cfg.beeIds.includes(id)) throw new Error(`Cannot archive or remove ${id} while it has an open paper position. Close it and restart.`);
+    }
+    for (const id of cfg.beeIds) {
       this.bees[id] = db.loadBee(id) ?? freshBee(id, cfg.risk.startEquityUsd, this.now());
       await this.d.exec.init(id);
     }
@@ -156,7 +160,7 @@ export class Engine {
   stop(): void {
     this.stopped = true;
     for (const t of this.timers) clearTimeout(t);
-    for (const id of BEES) this.d.db.saveBee(this.bees[id], this.now());
+    for (const id of this.d.cfg.beeIds) this.d.db.saveBee(this.bees[id], this.now());
   }
 
   private loop(fn: () => Promise<void>, everyMs: number) {
@@ -199,23 +203,23 @@ export class Engine {
         log.warn("ticker refresh failed", { err: safeError(err) });
       }
       const now = this.now();
-      for (const id of BEES) this.markBee(id, now);
+      for (const id of this.d.cfg.beeIds) this.markBee(id, now);
       if (this.d.feed.lastRefreshAt === 0) return; // no market data yet
       if (this.d.exec.kind === "sim") this.simulateFunding(now);
 
       if (this.closedAt === null && this.d.closeRequested?.()) this.beginClose(now);
       if (this.closedAt === null && this.d.takeResumeRequest?.()) await this.resumeLast(now);
       if (this.closedAt !== null) await this.windDown(now);
-      else await Promise.all(BEES.map((id) => this.decide(id, now).catch((err) => log.error("decision failed", { bee: id, err: safeError(err) }))));
+      else await Promise.all(this.d.cfg.beeIds.map((id) => this.decide(id, now).catch((err) => log.error("decision failed", { bee: id, err: safeError(err) }))));
 
       if (now - this.lastEquityAt >= EQUITY_SNAPSHOT_MS) {
         this.lastEquityAt = now;
-        for (const id of BEES) {
+        for (const id of this.d.cfg.beeIds) {
           const b = this.bees[id];
           this.d.db.insertEquity(id, now, b.equityUsd, b.cashUsd, b.uplUsd);
         }
       }
-      this.d.bus.emit("equity", { bees: BEES.map((id) => this.publicBee(id)) }, now);
+      this.d.bus.emit("equity", { bees: this.d.cfg.beeIds.map((id) => this.publicBee(id)) }, now);
       if (this.d.exec.kind === "okx" && now - this.lastReconAt >= RECON_MS) await this.reconcile();
       this.checkJevOutage(now);
     } finally {
@@ -472,7 +476,7 @@ export class Engine {
    */
   private async resumeLast(now: number): Promise<void> {
     if (this.d.cfg.mode !== "dry") return;
-    for (const id of BEES) {
+    for (const id of this.d.cfg.beeIds) {
       const bee = this.bees[id];
       if (bee.position || (bee.cap !== "trade_cap" && bee.cap !== "fee_budget")) continue;
       const last = this.d.db.raw
@@ -512,7 +516,7 @@ export class Engine {
   /** Close whatever each bee holds (reduce-only market, through the normal ledger), then idle. */
   private async windDown(now: number): Promise<void> {
     await Promise.all(
-      BEES.map(async (id) => {
+      this.d.cfg.beeIds.map(async (id) => {
         const bee = this.bees[id];
         const p = bee.position;
         if (!p || now < (this.closeRetryAt[id] ?? 0)) return;
@@ -526,7 +530,7 @@ export class Engine {
         this.d.db.saveBee(bee, now);
       }),
     ).catch((err) => log.error("close failed", { err: safeError(err) }));
-    if (!this.closeAnnounced && BEES.every((id) => !this.bees[id].position)) {
+    if (!this.closeAnnounced && this.d.cfg.beeIds.every((id) => !this.bees[id].position)) {
       this.closeAnnounced = true;
       this.d.db.setMeta("experiment_flat_at", String(now));
       this.lastReconAt = 0; // confirm flat against OKX on the next tick
@@ -562,7 +566,7 @@ export class Engine {
    */
   async exitWatch(): Promise<void> {
     if (this.watchingExits || this.closedAt !== null || this.d.feed.lastRefreshAt === 0) return;
-    if (!BEES.some((id) => this.bees[id]?.position)) return;
+    if (!this.d.cfg.beeIds.some((id) => this.bees[id]?.position)) return;
     this.watchingExits = true;
     try {
       try {
@@ -571,7 +575,7 @@ export class Engine {
         log.warn("ticker refresh failed (exit watch)", { err: safeError(err) });
       }
       const now = this.now();
-      for (const id of BEES) {
+      for (const id of this.d.cfg.beeIds) {
         if (!this.bees[id]?.position || this.executing.has(id)) continue;
         this.markBee(id, now);
         if (!this.deterministicExit(id, now)) continue;
@@ -734,7 +738,7 @@ export class Engine {
     if (slot === this.lastFundingSlot) return;
     this.lastFundingSlot = slot;
     const view = this.d.feed.view();
-    for (const id of BEES) {
+    for (const id of this.d.cfg.beeIds) {
       const bee = this.bees[id];
       const p = bee.position;
       const s = p ? view.stats.get(p.instId) : undefined;
@@ -751,7 +755,7 @@ export class Engine {
   /** MODE=demo/live: record funding bills (type 8) as their own ledger rows. */
   private async pollFunding() {
     const since = Number(this.d.db.getMeta("funding_since") ?? 0);
-    for (const id of BEES) {
+    for (const id of this.d.cfg.beeIds) {
       const bills = await this.d.exec.fundingBills(id);
       for (const b of bills ?? []) {
         if (b.ts < since) continue;
@@ -769,7 +773,7 @@ export class Engine {
     this.lastReconAt = now;
     const view = this.d.feed.view();
     const diffs: string[] = [];
-    for (const id of BEES) {
+    for (const id of this.d.cfg.beeIds) {
       const bee = this.bees[id];
       const ex = await this.d.exec.positions(id);
       if (ex === null) {
@@ -839,7 +843,7 @@ export class Engine {
   /** Momentum bees: who is #1 on the hourly rank, and for how many ranks in a row. */
   private rankBoozyHourly() {
     const now = this.now();
-    for (const id of BEES) {
+    for (const id of this.d.cfg.beeIds) {
       if (this.d.cfg.slots[id].style !== "boozy") continue;
       const bee = this.bees[id];
       if (Math.floor(now / 3_600_000) === Math.floor(bee.top1.rankedAt / 3_600_000)) continue;
@@ -863,7 +867,7 @@ export class Engine {
     const lab = this.d.lab;
     if (lab && lab.version !== this.brainsVersion) {
       this.brainsVersion = lab.version;
-      for (const b of BEES) {
+      for (const b of this.d.cfg.beeIds) {
         const overlay = lab.overlay(b)?.id ?? null;
         if (this.brains[b] && (this.brainOverlay[b] ?? null) === overlay) continue;
         if (this.brains[b]) log.info("bee brain updated by the Beekeeper", { bee: b, overlay });
@@ -937,14 +941,14 @@ export class Engine {
   }
 
   snapshot() {
-    const bees = BEES.map((id) => this.publicBee(id));
+    const bees = this.d.cfg.beeIds.map((id) => this.publicBee(id));
     const sum = (f: (b: (typeof bees)[number]) => number) => Number(bees.reduce((a, b) => a + f(b), 0).toFixed(4));
     const view = this.d.feed.view();
     return {
       ts: this.now(),
       mode: this.d.cfg.mode,
       startedAt: this.experimentStartedAt,
-      closed: this.closedAt === null ? null : { at: this.closedAt, flat: BEES.every((id) => !this.bees[id].position) },
+      closed: this.closedAt === null ? null : { at: this.closedAt, flat: this.d.cfg.beeIds.every((id) => !this.bees[id].position) },
       startEquityUsd: this.d.cfg.risk.startEquityUsd,
       tickMs: this.d.cfg.tickMs,
       bees,
@@ -976,7 +980,7 @@ export class Engine {
 
   health() {
     const age = this.now() - this.d.feed.lastRefreshAt;
-    return { ok: this.d.feed.lastRefreshAt > 0 && age < 5 * this.d.cfg.dataRefreshMs, mode: this.d.cfg.mode, closed: this.closedAt !== null, flat: BEES.every((id) => !this.bees[id].position), marketAgeMs: age, uptimeS: Math.round((this.now() - this.startedAt) / 1000) };
+    return { ok: this.d.feed.lastRefreshAt > 0 && age < 5 * this.d.cfg.dataRefreshMs, mode: this.d.cfg.mode, closed: this.closedAt !== null, flat: this.d.cfg.beeIds.every((id) => !this.bees[id].position), marketAgeMs: age, uptimeS: Math.round((this.now() - this.startedAt) / 1000) };
   }
 }
 

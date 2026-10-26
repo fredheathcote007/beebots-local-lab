@@ -5,7 +5,7 @@ import { Header } from "./Header";
 import { unlockAudio } from "./sound";
 import { Ticker } from "./Ticker";
 import { Toasts } from "./Toasts";
-import { BEE_META, BEE_NAMES, chooserShort } from "./types";
+import { beeMeta, BEE_NAMES, chooserShort } from "./types";
 import { useFeed } from "./useFeed";
 
 function readSoundPref(): boolean {
@@ -55,7 +55,7 @@ export function App() {
     <div className="app">
       <Header snap={feed.snap} connected={feed.connected} stalled={stalled} soundOn={soundOn} onSound={toggleSound} />
       <main className="grid">
-        {BEE_NAMES.map((name) => {
+        <div className="bee-grid">{BEE_NAMES.map((name) => {
           const bee = feed.bees[name];
           return (
             <BeeColumn
@@ -70,7 +70,7 @@ export function App() {
               chooser={chooserShort(feed.snap)}
             />
           );
-        })}
+        })}</div>
         <aside className="rail">
           <Beekeeper keeper={feed.snap?.keeper} />
           <section className="rail-card board">
@@ -82,10 +82,10 @@ export function App() {
               const b = feed.bees[name];
               const width = b ? Math.max(4, (b.equityUsd / Math.max(leaderEq, 1)) * 100) : 0;
               return (
-                <div className="board-row" key={name} style={{ ["--bee" as string]: BEE_META[name].color }}>
+                <div className="board-row" key={name} style={{ ["--bee" as string]: beeMeta(name).color }}>
                   <span className="board-rank num">{i + 1}</span>
-                  <img src={BEE_META[name].img} alt="" />
-                  <span className="board-name">{BEE_META[name].short}</span>
+                  <img src={beeMeta(name).img} alt="" />
+                  <span className="board-name">{beeMeta(name).short}</span>
                   <span className="board-bar">
                     <span style={{ width: `${width}%` }} />
                   </span>

@@ -1,8 +1,8 @@
 // Mirrors the engine's read-only /snapshot and SSE payloads. No account data exists in these shapes.
-import { BEE_MARK_URL } from "./BeeMark";
+import { BEE_MARK_URL } from "./BeeMark.js";
 
 /** The three bee slots. Names, taglines and portraits come from the engine's /profile (set on the Setup page). */
-export type BeeName = "bee1" | "bee2" | "bee3";
+export type BeeName = string;
 export const BEE_NAMES: BeeName[] = ["bee1", "bee2", "bee3"];
 
 export type Cap = "trade_cap" | "fee_budget" | "loss_stop" | "retired" | null;
@@ -200,7 +200,7 @@ export interface BeeMeta {
 }
 
 /** Colours belong to the slot, so two bees on the same style still look different. Filled in from /profile at load. */
-export const BEE_META: Record<BeeName, BeeMeta> = {
+export const BEE_META: Record<string, BeeMeta> = {
   bee1: { title: "Bizzy Bee", short: "Bizzy", tagline: "the grinder", styleLabel: "Breakout", rules: "", coins: [], img: "/bees/bizzy.jpg", color: "var(--bizzy)", glow: "var(--bizzy-glow)" },
   bee2: { title: "Breezy Bee", short: "Breezy", tagline: "the calculated one", styleLabel: "Trend", rules: "", coins: [], img: "/bees/breezy.jpg", color: "var(--breezy)", glow: "var(--breezy-glow)" },
   bee3: { title: "Boozy Bee", short: "Boozy", tagline: "the degen", styleLabel: "Momentum", rules: "", coins: [], img: "/bees/boozy.jpg", color: "var(--boozy)", glow: "var(--boozy-glow)" },
@@ -220,9 +220,10 @@ const OFFICIAL_NAMES = ["Bizzy", "Breezy", "Boozy"];
 
 export function applyProfile(p: Profile): void {
   PROFILE.links = p.links;
+  BEE_NAMES.splice(0, BEE_NAMES.length, ...p.bees.map((b) => b.id));
   for (const b of p.bees) {
-    const m = BEE_META[b.id];
-    if (!m) continue;
+    const prior = BEE_META[b.id];
+    const m = prior ?? (BEE_META[b.id] = { title: b.name, short: b.name, tagline: b.tagline, styleLabel: b.styleLabel, rules: "", coins: [], img: BEE_MARK_URL, color: "var(--bee-generic)", glow: "var(--bee-generic-glow)" });
     m.short = b.name;
     m.title = OFFICIAL_NAMES.includes(b.name) ? `${b.name} Bee` : b.name;
     m.tagline = b.tagline;
@@ -231,6 +232,10 @@ export function applyProfile(p: Profile): void {
     m.coins = b.coins ?? [];
     m.img = b.img ?? BEE_MARK_URL;
   }
+}
+
+export function beeMeta(id: BeeName): BeeMeta {
+  return BEE_META[id] ?? (BEE_META[id] = { title: id, short: id, tagline: "", styleLabel: "Paper", rules: "", coins: [], img: BEE_MARK_URL, color: "var(--bee-generic)", glow: "var(--bee-generic-glow)" });
 }
 
 /** Shown on Setup and in the dashboard's Hive dialog. */

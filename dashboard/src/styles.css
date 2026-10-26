@@ -21,6 +21,8 @@
   --bizzy-glow: rgba(201, 133, 0, 0.45);
   --breezy-glow: rgba(144, 133, 233, 0.45);
   --boozy-glow: rgba(213, 81, 129, 0.45);
+  --bee-generic: #47aaa2;
+  --bee-generic-glow: rgba(71, 170, 162, 0.4);
 
   /* Status (reserved; always paired with a glyph) */
   --good: #0ca30c;
@@ -446,7 +448,16 @@ a.counter.host:hover {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: repeat(3, 1fr) 1.08fr;
+  grid-template-columns: minmax(0, 3fr) minmax(250px, 1.08fr);
+  gap: 1rem;
+}
+.bee-grid {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  align-content: start;
+  overflow-y: auto;
   gap: 1rem;
 }
 
@@ -1155,6 +1166,7 @@ a.counter.host:hover {
     flex-direction: column;
     gap: 0.75rem;
   }
+  .bee-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); }
   .rail {
     display: contents;
   }
