@@ -36,3 +36,7 @@ If the GPU or Project Coordinator becomes unavailable, if the model begins bindi
 ## Review outcome
 
 An independent final Codex reviewer gave **GO for publishing a DRAFT PR**, with no Critical/High issues found. It flagged small six-request sample size and earlier lack of portable raw evidence as Medium. These limitations are now disclosed and the four synthetic-only raw benchmark JSON runs have been retained under `docs/phase19/evidence/`. This PR does not approve model operational enablement or a production restart.
+
+## Continuous validation
+
+Added a credential-free GitHub Actions `validate.yml` workflow using standard GitHub-hosted Ubuntu runners, pinned Node 22 and pnpm 10.34.5, read-only repository permissions, and bounded 15-minute jobs. Runs TypeScript, lint, unit/regression tests, engine build and dashboard build. This public repository qualifies for GitHub standard hosted-runner free use; no local runner access, privileged host/GPU, Docker socket or secrets are supplied. The workflow is an additional remote gate, **not** a substitute for the local GPU/UDS qualification.

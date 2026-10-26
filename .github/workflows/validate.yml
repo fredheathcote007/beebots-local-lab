@@ -1,0 +1,52 @@
+name: BeeBots validation
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Typecheck, lint, tests, builds
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      CI: true
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+      - name: Install pinned pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.5
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            dashboard/pnpm-lock.yaml
+      - name: Install engine dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Check types
+        run: pnpm typecheck
+      - name: Lint
+        run: pnpm lint
+      - name: Unit and regression tests
+        run: pnpm test
+      - name: Build engine
+        run: pnpm build
+      - name: Install dashboard dependencies
+        run: pnpm --dir dashboard install --frozen-lockfile
+      - name: Build dashboard
+        run: pnpm --dir dashboard build
+      - name: Check invalid whitespace
+        run: git diff --check HEAD
