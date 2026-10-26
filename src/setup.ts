@@ -256,17 +256,11 @@ export class Setup {
   private async route(path: string, body: Record<string, unknown>, res: ServerResponse) {
     switch (path) {
       case "/setup/check-jev": {
-        const key = String(body.key ?? "").trim();
-        if (key.length < 8) return send(res, 400, { error: "Paste your Jev API key." });
-        const err = await this.checkJev(key, this.o.jevModel);
-        return send(res, err ? 400 : 200, err ? { error: err } : { ok: true });
+        return send(res, 400, { error: "Cloud chooser keys are disabled in this paper-only lab." });
       }
 
       case "/setup/check-gemini": {
-        const key = String(body.key ?? "").trim();
-        if (key.length < 8) return send(res, 400, { error: "Paste your Gemini API key." });
-        const err = await this.checkGemini(key, this.o.geminiModel);
-        return send(res, err ? 400 : 200, err ? { error: err } : { ok: true });
+        return send(res, 400, { error: "Cloud chooser keys are disabled in this paper-only lab." });
       }
 
       case "/setup/check-openai": {
@@ -319,12 +313,10 @@ export class Setup {
           return send(res, 400, { error: `Something is missing or not allowed (${what}).` });
         }
         const b = parsed.data;
+        if (b.geminiKey || b.jevKey) return send(res, 400, { error: "Cloud chooser keys are disabled in this paper-only lab." });
         if (!b.openaiKey && !this.o.openai.apiKey) return send(res, 400, { error: "Your bees need an OpenAI key (it designs and paints them)." });
         const missing = BEES.filter((slot) => imagePath(this.o.settingsPath, slot) === null);
         if (missing.length) return send(res, 400, { error: "Every bee needs its portrait before you start." });
-        if (!b.geminiKey && !b.jevKey) return send(res, 400, { error: "Your bees need a Gemini key (or a Jev key) to make their calls." });
-        const keyErr = b.geminiKey ? await this.checkGemini(b.geminiKey, this.o.geminiModel) : await this.checkJev(b.jevKey!, this.o.jevModel);
-        if (keyErr) return send(res, 400, { error: keyErr });
         // The page's coins and style are re-checked here: coins against OKX's list (when it can be read), the style
         // against the coins.
         const known = await this.coinList().catch(() => null);
@@ -334,10 +326,7 @@ export class Setup {
         });
         const s: Settings = {
           version: 1,
-          ...(b.geminiKey ? { geminiKey: b.geminiKey } : {}),
-          ...(b.jevKey ? { jevKey: b.jevKey } : {}),
           ownerPasswordHash: hashPassword(b.ownerPassword),
-          ...(b.openaiKey ? { openaiKey: b.openaiKey } : {}),
           acceptedRiskAt: Date.now(),
           bees,
           hive: b.hive,

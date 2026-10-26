@@ -19,7 +19,7 @@ const BEES = [
   { name: "Rex", style: "boozy", tagline: "the wild one", rules: "Chase whatever is pumping hardest this week.", coins: [], look: "a bee with a dinosaur hoodie", image: true },
 ];
 const ACCEPT = { notAdvice: true, paperDefault: true, ownRisk: true };
-const SAVE = { jevKey: "good-jev-key", openaiKey: "sk-test-key", ownerPassword: "correct horse", accept: ACCEPT, bees: BEES, hive: false };
+const SAVE = { openaiKey: "sk-test-key", ownerPassword: "correct horse", accept: ACCEPT, bees: BEES, hive: false };
 
 const design = (over: Partial<BeeDesign> = {}): BeeDesign => ({
   name: "Donny",
@@ -76,14 +76,14 @@ async function boot(opts: { designs?: BeeDesign[] } = {}) {
 describe("setup", () => {
   it("needs no code: the page can write straight away", async () => {
     const t = await boot();
-    expect((await t.post("/setup/check-jev", { key: "good-jev-key" })).status).toBe(200);
+    expect((await t.post("/setup/check-jev", { key: "good-jev-key" })).status).toBe(400);
   });
 
   it("closes when the setup window runs out, with a restart hint", async () => {
     const t = await boot();
     t.paintAll();
     t.advance(119 * 60_000);
-    expect((await t.post("/setup/check-jev", { key: "good-jev-key" })).status).toBe(200);
+    expect((await t.post("/setup/check-jev", { key: "good-jev-key" })).status).toBe(400);
     t.advance(60_000);
     const r = await t.post("/setup/save", SAVE);
     expect(r.status).toBe(410);
@@ -99,11 +99,10 @@ describe("setup", () => {
     expect((await t.post("/setup/design", { openaiKey: "sk-test", description: "a Trump bee" })).status).toBe(429);
   });
 
-  it("the Gemini key check shares the per-visitor cap (each one is an outbound call)", async () => {
+  it("rejects cloud chooser key checks without making outbound calls", async () => {
     const t = await boot();
-    for (let i = 0; i < 40; i++) expect((await t.post("/setup/check-gemini", { key: "good-gemini-key" })).status).toBe(200);
-    expect((await t.post("/setup/check-gemini", { key: "good-gemini-key" })).status).toBe(429);
-    expect((await t.post("/setup/check-jev", { key: "good-jev-key" })).status).toBe(429);
+    expect((await t.post("/setup/check-gemini", { key: "good-gemini-key" })).status).toBe(400);
+    expect((await t.post("/setup/check-jev", { key: "good-jev-key" })).status).toBe(400);
   });
 
   it("status carries no secrets", async () => {
@@ -121,41 +120,31 @@ describe("setup", () => {
     expect(loadSettings(t.settingsPath)).toBeNull();
   });
 
-  it("refuses a Jev key that Jev rejects", async () => {
+  it("refuses to save a legacy Jev chooser key", async () => {
     const t = await boot();
     t.paintAll();
     const r = await t.post("/setup/save", { ...SAVE, jevKey: "bad-jev-key" });
     expect(r.status).toBe(400);
-    expect(((await r.json()) as { error: string }).error).toMatch(/rejected/);
+    expect(((await r.json()) as { error: string }).error).toMatch(/Cloud chooser keys are disabled/);
     expect(loadSettings(t.settingsPath)).toBeNull();
   });
 
-  it("saves a Gemini key instead of a Jev key, checked with Google, and the engine then runs Gemini 4 Argon", async () => {
+  it("rejects Gemini chooser keys because cloud choosers are disabled", async () => {
     const t = await boot();
-    expect((await t.post("/setup/check-gemini", { key: "good-gemini-key" })).status).toBe(200);
-    const bad = await t.post("/setup/check-gemini", { key: "bad-gemini-key" });
-    expect(bad.status).toBe(400);
-    expect(((await bad.json()) as { error: string }).error).toMatch(/rejected/);
+    expect((await t.post("/setup/check-gemini", { key: "good-gemini-key" })).status).toBe(400);
     t.paintAll();
-    const noJev: Record<string, unknown> = { ...SAVE };
-    delete noJev.jevKey;
-    expect((await t.post("/setup/save", { ...noJev, geminiKey: "bad-gemini-key" })).status).toBe(400);
-    expect((await t.post("/setup/save", { ...noJev, geminiKey: "good-gemini-key", jevKey: "" })).status).toBe(200);
-    const s = loadSettings(t.settingsPath)!;
-    expect(s.geminiKey).toBe("good-gemini-key");
-    expect(s.jevKey).toBeUndefined();
-    expect(loadConfig({}, s).jev).toMatchObject({ provider: "gemini", model: "gemini-4-argon" });
-  });
-
-  it("refuses to save with no decision-model key at all", async () => {
-    const t = await boot();
-    t.paintAll();
-    const noJev: Record<string, unknown> = { ...SAVE };
-    delete noJev.jevKey;
-    const r = await t.post("/setup/save", noJev);
+    const r = await t.post("/setup/save", { ...SAVE, geminiKey: "good-gemini-key" });
     expect(r.status).toBe(400);
-    expect(((await r.json()) as { error: string }).error).toMatch(/Gemini key/);
+    expect(((await r.json()) as { error: string }).error).toMatch(/Cloud chooser keys are disabled/);
     expect(loadSettings(t.settingsPath)).toBeNull();
+  });
+
+  it("saves paper settings without any decision-model key", async () => {
+    const t = await boot();
+    t.paintAll();
+    expect((await t.post("/setup/save", SAVE)).status).toBe(200);
+    expect(loadSettings(t.settingsPath)).not.toHaveProperty("jevKey");
+    expect(loadSettings(t.settingsPath)).not.toHaveProperty("geminiKey");
   });
 
   it("saves owner-only, restarts once, then refuses further writes; the result runs as paper trading", async () => {
@@ -333,7 +322,6 @@ describe("settings", () => {
   it("still reads a Setup file saved before designed bees and the Hive existed", () => {
     const old = {
       version: 1,
-      jevKey: "from-setup",
       acceptedRiskAt: 1,
       createdAt: 1,
       bees: [
@@ -347,6 +335,12 @@ describe("settings", () => {
     expect(s.bees[0]).toMatchObject({ rules: "", coins: [], image: false });
     // A Setup-made bee without a portrait never falls back to the official art (index.ts profile: img null).
     expect(loadConfig({}, s).slots.bee1).toMatchObject({ fromSetup: true, customImage: false });
+  });
+
+  it("rejects remote chooser keys in an existing settings file", () => {
+    const path = join(mkdtempSync(join(tmpdir(), "bees-settings-")), "settings.json");
+    writeFileSync(path, JSON.stringify({ version: 1, geminiKey: "remote-secret", acceptedRiskAt: 1, createdAt: 1, bees: BEES }));
+    expect(() => loadSettings(path)).toThrow(/credential fields.*paper-only/);
   });
 
   it("keeps coins as upper-case tickers", () => {

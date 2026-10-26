@@ -1,6 +1,7 @@
 import type { BeeId, OkxCreds } from "../config.js";
 import { log } from "../log.js";
 import type { Instrument, Ticker } from "../market/types.js";
+import { MAX_TICKER_AGE_MS } from "../market/data.js";
 import type { OkxCli } from "../okx/cli.js";
 import { safeError } from "../redact.js";
 import { formatSz } from "./sizing.js";
@@ -59,7 +60,13 @@ export class SimExecutor implements Executor {
     const t = tickers.get(req.instId);
     const inst = instruments.get(req.instId);
     if (!t || !inst) return { ok: false, error: { code: "SIM", message: "no ticker" }, state: "rejected" };
-    const px = req.side === "buy" ? (t.ask > 0 ? t.ask : t.last) : t.bid > 0 ? t.bid : t.last;
+    const now = this.now();
+    if (!Number.isFinite(t.ts) || t.ts <= 0 || now - t.ts > MAX_TICKER_AGE_MS || t.ts - now > 30_000 ||
+        !Number.isFinite(t.bid) || t.bid <= 0 || !Number.isFinite(t.ask) || t.ask <= 0 ||
+        !Number.isFinite(t.last) || t.last <= 0 || t.ask < t.bid) {
+      return { ok: false, error: { code: "SIM_STALE", message: "ticker is stale or invalid" }, state: "rejected" };
+    }
+    const px = req.side === "buy" ? t.ask : t.bid;
     const feeUsd = req.contracts * inst.ctVal * px * this.takerFeeRate;
     return { ok: true, ordId: null, contracts: req.contracts, avgPx: px, feeUsd, ts: this.now() };
   }

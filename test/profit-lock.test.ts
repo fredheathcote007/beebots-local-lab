@@ -51,7 +51,7 @@ async function harness(px: number, answer = "RIDE") {
     },
   };
   const db = new Db(":memory:");
-  const engine = new Engine({ cfg, db, feed, jev: new Jev({ ...cfg.jev, client, now: () => NOW }), exec: new SimExecutor(() => v, cfg.risk.takerFeeRate), bus: new EventBus(db), alerts: new Alerts(undefined), now: () => NOW });
+  const engine = new Engine({ cfg, db, feed, jev: new Jev({ ...cfg.jev, client, now: () => NOW }), exec: new SimExecutor(() => v, cfg.risk.takerFeeRate, () => NOW), bus: new EventBus(db), alerts: new Alerts(undefined), now: () => NOW });
   await engine.start();
   engine.stop();
   const setPx = (p: number) => {
@@ -116,7 +116,7 @@ describe("engine: breezy's TRIM_HALF trims once per 3-point drop, not every tick
       },
     };
     const db = new Db(":memory:");
-    const engine = new Engine({ cfg, db, feed, jev: new Jev({ ...cfg.jev, client, now: () => NOW }), exec: new SimExecutor(() => v, cfg.risk.takerFeeRate), bus: new EventBus(db), alerts: new Alerts(undefined), now: () => NOW });
+    const engine = new Engine({ cfg, db, feed, jev: new Jev({ ...cfg.jev, client, now: () => NOW }), exec: new SimExecutor(() => v, cfg.risk.takerFeeRate, () => NOW), bus: new EventBus(db), alerts: new Alerts(undefined), now: () => NOW });
     await engine.start();
     engine.stop();
     engine.bees.bee2.position = { instId: btc.instId, coin: "BTC", side: "long", contracts: 400, entryPx: 80000, openedAt: NOW - 60 * 60_000, stopPx: 70000, riskUsd: 10, initialStopPx: 70000, entryScore: 7 };
@@ -138,7 +138,7 @@ describe("engine: over the daily cap the bees run on the code fallback", () => {
     const db = new Db(":memory:");
     const jev = new Jev({ ...cfg.jev, apiKey: "set", spentTodayUsd: cfg.jev.dailyUsdCap, now: () => NOW, fetchFn: (async () => { throw new Error("must not be called"); }) as unknown as typeof fetch });
     expect(jev.capTripped).toBe(true);
-    const engine = new Engine({ cfg, db, feed, jev, exec: new SimExecutor(() => v, cfg.risk.takerFeeRate), bus: new EventBus(db), alerts: new Alerts(undefined), now: () => NOW });
+    const engine = new Engine({ cfg, db, feed, jev, exec: new SimExecutor(() => v, cfg.risk.takerFeeRate, () => NOW), bus: new EventBus(db), alerts: new Alerts(undefined), now: () => NOW });
     await engine.start();
     engine.stop();
     await engine.tick();
@@ -166,7 +166,7 @@ describe("engine: stops do not wait on the chooser", () => {
       },
     };
     const db = new Db(":memory:");
-    const engine = new Engine({ cfg, db, feed, jev: new Jev({ ...cfg.jev, client, now: () => NOW }), exec: new SimExecutor(() => v, cfg.risk.takerFeeRate), bus: new EventBus(db), alerts: new Alerts(undefined), now: () => NOW });
+    const engine = new Engine({ cfg, db, feed, jev: new Jev({ ...cfg.jev, client, now: () => NOW }), exec: new SimExecutor(() => v, cfg.risk.takerFeeRate, () => NOW), bus: new EventBus(db), alerts: new Alerts(undefined), now: () => NOW });
     await engine.start();
     engine.stop();
     const instId = [...v.stats.keys()][0]!;
@@ -222,7 +222,7 @@ describe("engine: one bee's hung chooser delays no other bee's stop", () => {
     let calls = 0;
     const client: SystemOne = { systemOne: () => (calls++, new Promise(() => {})) }; // hangs for ever
     const db = new Db(":memory:");
-    const engine = new Engine({ cfg, db, feed, jev: new Jev({ ...cfg.jev, client, now: () => NOW }), exec: exec ? exec(() => v) : new SimExecutor(() => v, cfg.risk.takerFeeRate), bus: new EventBus(db), alerts: new Alerts(undefined), now: () => NOW });
+    const engine = new Engine({ cfg, db, feed, jev: new Jev({ ...cfg.jev, client, now: () => NOW }), exec: exec ? exec(() => v) : new SimExecutor(() => v, cfg.risk.takerFeeRate, () => NOW), bus: new EventBus(db), alerts: new Alerts(undefined), now: () => NOW });
     await engine.start();
     engine.stop();
     const instId = [...v.stats.keys()][0]!;
@@ -272,7 +272,7 @@ describe("engine: one bee's hung chooser delays no other bee's stop", () => {
   it("serializes per bee: the tick and the exit watch racing on one stop send exactly one order", async () => {
     // A slow exchange: every order takes 30 ms, so both passes see the position before either fills.
     const h = await twoBees((v) => {
-      const sim = new SimExecutor(v, 0.0005);
+      const sim = new SimExecutor(v, 0.0005, () => NOW);
       const market = sim.market.bind(sim);
       sim.market = async (...a: Parameters<SimExecutor["market"]>) => (await new Promise((r) => setTimeout(r, 30)), market(...a));
       return sim;
