@@ -1,0 +1,11 @@
+{
+  "model": "decider-4b-v2.1",
+  "answers": {
+    "action": {
+      "type": "choice",
+      "choice": "WAIT",
+      "confidence": 0.9768,
+      "probabilities": { "WAIT": 0.9845, "BUY_BTC": 0.0129, "SELL_BTC": 0.0026 }
+    }
+  }
+}

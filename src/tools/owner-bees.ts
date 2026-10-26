@@ -32,7 +32,7 @@ Docker volume command:
   docker compose exec -T engine node dist/tools/owner-bees.js --file /data/bee-profiles.json list
 
 The profile path rejects symlinks. Changes take effect after an engine restart.
-Instructions are display notes and are not interpreted by the code chooser.`);
+Instructions are plain-text prompt data for the optional local shadow only; the deterministic chooser ignores them.`);
   process.exit(2);
 }
 if (!command) usage();
@@ -57,7 +57,7 @@ try {
     }
     case "edit-instructions": {
       if (rest.length < 2) usage(); const b = find(ps, rest[0]!); b.rules = rest.slice(1).join(" ");
-      write(ps); console.log("Natural-language notes saved. The deterministic chooser does not interpret them; they are for a later local decision model."); break;
+      write(ps); console.log("Natural-language notes saved for optional local shadow prompt data. The deterministic chooser does not interpret them."); break;
     }
     case "update-coins": {
       count(2); const b = find(ps, rest[0]!); const v = rest[1]!.toLowerCase() === "any" ? [] : rest[1]!.split(",").map((x) => x.trim().toUpperCase());

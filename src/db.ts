@@ -43,6 +43,13 @@ CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
 -- ignores the table, so going back to an older version keeps this DB.
 CREATE TABLE IF NOT EXISTS chooser_spend (id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, bee TEXT NOT NULL, reserved_usd REAL NOT NULL, charged_usd REAL NOT NULL, settled INTEGER NOT NULL DEFAULT 0);
 CREATE INDEX IF NOT EXISTS chooser_spend_ts ON chooser_spend(ts);
+-- Append-only shadow outcomes are isolated from executable decisions and orders.
+CREATE TABLE IF NOT EXISTS shadow_decisions (
+  id INTEGER PRIMARY KEY, bee TEXT NOT NULL, ts INTEGER NOT NULL, market_ts INTEGER NOT NULL,
+  model TEXT NOT NULL, choice TEXT, probabilities_json TEXT, baseline_choice TEXT NOT NULL,
+  status TEXT NOT NULL, reason TEXT, latency_ms INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS shadow_decisions_ts ON shadow_decisions(ts);
 `;
 
 export interface DecisionRow {
@@ -251,6 +258,14 @@ export class Db {
   chooserSpendSince(ts: number): number {
     const r = this.raw.prepare(`SELECT COALESCE(SUM(charged_usd), 0) AS s FROM chooser_spend WHERE ts >= ?`).get(ts) as { s: number };
     return r.s;
+  }
+
+  insertShadowDecision(row: { bee: string; ts: number; marketTs: number; model: string; choice: string | null; probabilities: Record<string, number> | null; baselineChoice: string; status: string; reason?: string; latencyMs: number }): void {
+    const inserted = this.raw.prepare(`INSERT INTO shadow_decisions (bee, ts, market_ts, model, choice, probabilities_json, baseline_choice, status, reason, latency_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      row.bee, row.ts, row.marketTs, row.model, row.choice, row.probabilities ? JSON.stringify(row.probabilities) : null, row.baselineChoice, row.status, row.reason ?? null, row.latencyMs,
+    );
+    const id = Number(inserted.lastInsertRowid);
+    if (id > 10_000) this.raw.prepare(`DELETE FROM shadow_decisions WHERE id <= ?`).run(id - 10_000);
   }
 
   jevSpendSince(ts: number): number {
