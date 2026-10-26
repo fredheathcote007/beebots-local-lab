@@ -73,3 +73,7 @@ See [Phase 1 design and boundaries](docs/local-lab/PHASE1.md) and [implementatio
 ## Phase status
 
 See [Phase 1.6 runtime status](docs/phase16/RUNTIME-STATUS.md) for owner-managed bees and [Phase 1.7 integration status](docs/phase17/STATUS.md) for the local shadow gates. The LAN dashboard stays read-only and paper-only.
+
+### Optional local Decider shadow via private Unix socket (experimental)
+
+Phase 1.8 adds an **opt-in, disabled-by-default** Unix-socket transport for Docker-to-host local Decider-4B observations. On the Project Coordinator, the host relay uses `/run/user/1000/beebots-decider/decider.sock` (UID1000-owned 0700 parent / 0600 socket), which the separate `docker-compose.shadow.yml` override mounts **read-only** at `/run/beebots-decider/decider.sock` inside the engine. The model itself stays on host `127.0.0.1:18009` only. **Do not use the override for normal production** until the documented security, latency, restart, and rollback gates pass. All paper decisions remain deterministic; model results are shadow observations only. See `docs/phase18/ARCHITECTURE.md` and `docs/phase18/STATUS.md`.

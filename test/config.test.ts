@@ -42,8 +42,11 @@ describe("paper-only local config", () => {
   });
 
   it("keeps the host shadow off by default and pins its endpoint identity", () => {
-    expect(loadConfig({}).localShadow).toEqual({ enabled: false });
-    expect(() => loadConfig({ LOCAL_SHADOW_ENABLED: "true", PAPER_CONTAINER_BIND: "true" })).toThrow(/host-native engine/i);
+    expect(loadConfig({}).localShadow).toMatchObject({ enabled: false, transport: "host-loopback", socketPath: "/run/beebots-decider/decider.sock" });
+    expect(() => loadConfig({ LOCAL_SHADOW_ENABLED: "true", PAPER_CONTAINER_BIND: "true" })).toThrow(/unix-socket/i);
+    expect(() => loadConfig({ LOCAL_SHADOW_TRANSPORT: "http://elsewhere" })).toThrow(/LOCAL_SHADOW_TRANSPORT/i);
+    expect(() => loadConfig({ LOCAL_SHADOW_ENABLED: "true", PAPER_CONTAINER_BIND: "true", LOCAL_SHADOW_TRANSPORT: "host-loopback" })).toThrow(/unix-socket/i);
+    expect(loadConfig({ LOCAL_SHADOW_ENABLED: "true", PAPER_CONTAINER_BIND: "true", LOCAL_SHADOW_TRANSPORT: "unix-socket" }).localShadow).toMatchObject({ enabled: true, transport: "unix-socket" });
     expect(() => loadConfig({ LOCAL_SHADOW_MODEL: "other-model" })).toThrow(/pinned/i);
     expect(loadConfig({ LOCAL_SHADOW_MODEL: "decider-4b-v2.1" }).localShadow.enabled).toBe(false);
   });
