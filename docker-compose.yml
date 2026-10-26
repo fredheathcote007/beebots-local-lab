@@ -28,6 +28,7 @@ services:
       ENGINE_PORT: "8080"
       DB_PATH: /data/bees-{mode}.sqlite
       SETTINGS_PATH: /data/settings.json
+      BEE_PROFILES_PATH: /data/bee-profiles.json
     volumes:
       - bees-data:/data
     expose:

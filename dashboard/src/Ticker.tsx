@@ -1,10 +1,10 @@
 import { memo } from "react";
-import { BEE_META, byCode, fallbackText, type DecisionEvent } from "./types";
+import { beeMeta, byCode, fallbackText, type DecisionEvent } from "./types";
 
 const signed = (x: number) => `${x >= 0 ? "+" : "−"}$${Math.abs(x).toFixed(2)}`;
 
 const Row = memo(function Row({ d, chooser }: { d: DecisionEvent; chooser: string }) {
-  const meta = BEE_META[d.bee];
+  const meta = beeMeta(d.bee);
   const top = d.probabilities.slice(0, 3);
   const acted = d.action !== "hold";
   const live = d.live;

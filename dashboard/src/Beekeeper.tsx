@@ -4,7 +4,7 @@
 // Off: a short pitch and the "Connect the Beekeeper" form. On: the rounds, plus the owner's controls.
 // Every write carries the owner password picked on Setup, exactly as joining the Hive does.
 import { useState, type FormEvent } from "react";
-import { BEE_META, PROFILE, type BeeName, type KeeperEntry, type KeeperState } from "./types";
+import { beeMeta, PROFILE, type BeeName, type KeeperEntry, type KeeperState } from "./types";
 
 /** The shared Zap: anyone can copy it and point it at their own hive. */
 export const KEEPER_ZAP_URL = "https://mrc.fm/beekeeper";
@@ -56,7 +56,7 @@ const VERB: Record<KeeperEntry["action"], string> = {
 
 /** The bee a round was about, or the Beekeeper himself for a round that touched nobody. */
 function Who({ bee, big }: { bee: BeeName | null; big?: boolean }) {
-  const meta = bee ? BEE_META[bee] : null;
+  const meta = bee ? beeMeta(bee) : null;
   return (
     <img
       className={`keeper-who ${big ? "big" : ""} ${meta ? "" : "nobody"}`}
@@ -69,7 +69,7 @@ function Who({ bee, big }: { bee: BeeName | null; big?: boolean }) {
 }
 
 function meta(e: KeeperEntry): string {
-  const who = e.bee ? BEE_META[e.bee].short : null;
+  const who = e.bee ? beeMeta(e.bee).short : null;
   const head = e.action === "rewrote" || e.action === "rolled_back" || e.action === "refused" ? `${VERB[e.action]}${who ? ` ${who}` : ""}` : VERB[e.action];
   return e.idea ? `${head} · ${e.idea}` : head;
 }
@@ -157,7 +157,7 @@ export function Beekeeper({ keeper }: { keeper: KeeperState | undefined }) {
   };
   const undoButton = (e: KeeperEntry) =>
     e.bee && canUndo.has(e.id) ? (
-      <button type="button" className="keeper-undo" title={`Put ${BEE_META[e.bee].short} back on the rules from before this rewrite (owner password)`} onClick={() => ask({ kind: "undo", bee: e.bee! })}>
+      <button type="button" className="keeper-undo" title={`Put ${beeMeta(e.bee).short} back on the rules from before this rewrite (owner password)`} onClick={() => ask({ kind: "undo", bee: e.bee! })}>
         Undo
       </button>
     ) : null;
@@ -204,7 +204,7 @@ export function Beekeeper({ keeper }: { keeper: KeeperState | undefined }) {
       )}
 
       {latest ? (
-        <div className={`keeper-latest keeper-${latest.action}`} style={latest.bee ? { ["--bee" as string]: BEE_META[latest.bee].color } : undefined}>
+        <div className={`keeper-latest keeper-${latest.action}`} style={latest.bee ? { ["--bee" as string]: beeMeta(latest.bee).color } : undefined}>
           <Who bee={latest.bee} big />
           <div className="keeper-latest-body">
             <div className="keeper-quip">“{latest.quip}”</div>
@@ -251,7 +251,7 @@ export function Beekeeper({ keeper }: { keeper: KeeperState | undefined }) {
       {pending && (
         <form className="keeper-confirm" onSubmit={confirm}>
           <span className="keeper-confirm-what">
-            {pending.kind === "undo" ? `Undo the Beekeeper's latest rewrite of ${BEE_META[pending.bee].short}?` : pending.kind === "round" ? "Start a round now?" : "Disconnect the Beekeeper? Rewrites stay until you undo them."}
+            {pending.kind === "undo" ? `Undo the Beekeeper's latest rewrite of ${beeMeta(pending.bee).short}?` : pending.kind === "round" ? "Start a round now?" : "Disconnect the Beekeeper? Rewrites stay until you undo them."}
           </span>
           <div className="keeper-form-row">
             <input className="keeper-input" type="password" autoComplete="current-password" placeholder="Owner password" aria-label="Owner password" value={password} onChange={(e) => setPassword(e.target.value)} autoFocus />

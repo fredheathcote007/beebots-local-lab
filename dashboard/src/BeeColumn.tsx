@@ -1,5 +1,5 @@
 import { EquityChart } from "./EquityChart";
-import { BEE_META, byCode, fallbackText, type BeeName, type PublicBee } from "./types";
+import { beeMeta, byCode, fallbackText, type BeeName, type PublicBee } from "./types";
 import type { Curve, FeedState } from "./useFeed";
 
 const CAP_LABEL: Record<string, string> = { trade_cap: "BENCHED", fee_budget: "BENCHED", loss_stop: "SENT HOME", retired: "RETIRED" };
@@ -63,7 +63,7 @@ interface Props {
 }
 
 export function BeeColumn({ name, bee, curve, baseline, rank, gap, flash, chooser }: Props) {
-  const meta = BEE_META[name];
+  const meta = beeMeta(name);
   const p = bee?.position ?? null;
   const flashing = flash && Date.now() - flash.at < 2500;
   const cap = bee?.cap ?? null;

@@ -1,5 +1,5 @@
 import { signed } from "./BeeColumn";
-import { BEE_META } from "./types";
+import { beeMeta } from "./types";
 import type { KeeperToast, Toast } from "./useFeed";
 
 const PURPOSE: Record<string, string> = {
@@ -20,7 +20,7 @@ export function Toasts({ toasts, keeper }: { toasts: Toast[]; keeper: KeeperToas
   return (
     <div className="toasts" aria-live="polite">
       {keeper.map(({ id, entry }) => {
-        const meta = BEE_META[entry.bee!];
+        const meta = beeMeta(entry.bee!);
         return (
           <div key={id} className="toast toast-keeper" style={{ ["--bee" as string]: meta.color, ["--bee-glow" as string]: meta.glow }}>
             <img src="/beekeeper.jpg" alt="" />
@@ -33,7 +33,7 @@ export function Toasts({ toasts, keeper }: { toasts: Toast[]; keeper: KeeperToas
         );
       })}
       {toasts.map((t) => {
-        const meta = BEE_META[t.bee];
+        const meta = beeMeta(t.bee);
         const closing = t.purpose !== "open" && t.purpose !== "add";
         const net = t.realisedUsd - t.feeUsd;
         return (

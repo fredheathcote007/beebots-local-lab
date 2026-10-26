@@ -1,8 +1,12 @@
 import { z } from "zod";
 import { STYLE_INFO, STYLES, type Settings, type StyleId } from "./settings.js";
+import { existsSync } from "node:fs";
+import { readProfiles } from "./bee-profiles.js";
 
 /** Three bee slots. Each one trades one of the three styles (settings.ts); two bees may share a style. */
 export const BEES = ["bee1", "bee2", "bee3"] as const;
+// Runtime profile IDs are validated at the config boundary, then mapped through this built-in
+// type to preserve exhaustive checks in the legacy engine collaborators.
 export type BeeId = (typeof BEES)[number];
 export { STYLES, type StyleId };
 
@@ -126,6 +130,7 @@ const EnvSchema = z.object({
   DB_PATH: str("./data/bees-{mode}.sqlite"),
   // Written by the Setup page. Anything set in the environment wins over it.
   SETTINGS_PATH: str("./data/settings.json"),
+  BEE_PROFILES_PATH: str("./data/bee-profiles.json"),
   OPENAI_API_KEY: opt,
   OPENAI_TEXT_MODEL: str("gpt-5.4-nano"),
   OPENAI_IMAGE_MODEL: str("gpt-image-2"),
@@ -190,6 +195,8 @@ export interface SlotProfile {
   customImage: boolean;
   /** The owner's rules (fed to the chooser) and coin restriction, from Setup. Empty for the original three. */
   rules: string;
+  /** Profile-file instructions are shown to the owner but are not fed to the code chooser. */
+  instructions?: string;
   coins: string[];
   /** Made on the Setup page (never shown with the original bees' art). */
   fromSetup: boolean;
@@ -197,6 +204,7 @@ export interface SlotProfile {
 
 export interface Config {
   mode: Mode;
+  beeIds: BeeId[];
   slots: Record<BeeId, SlotProfile>;
   openai: { apiKey?: string; textModel: string; imageModel: string };
   links: { sponsor: string; code: string };
@@ -310,11 +318,20 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, settings: Setti
   const everyHours = e.BEEKEEPER_EVERY_HOURS === undefined ? undefined : Number(e.BEEKEEPER_EVERY_HOURS);
   if (everyHours !== undefined && !(everyHours >= 0.25)) throw new ConfigError("BEEKEEPER_EVERY_HOURS must be a number, at least 0.25");
   if (e.PUBLIC_URL && !originOf(e.PUBLIC_URL)) throw new ConfigError("PUBLIC_URL must look like https://your-domain or http://your-server-ip (no path)");
+  let profileRows;
+  try { profileRows = existsSync(e.BEE_PROFILES_PATH) ? readProfiles(e.BEE_PROFILES_PATH).profiles : null; }
+  catch (err) { throw new ConfigError(`Invalid bee profiles: ${err instanceof Error ? err.message : "profile validation failed"}`); }
+  const activeProfiles = profileRows?.filter((p) => p.active);
+  const beeIds = (activeProfiles?.map((p) => p.id) ?? [...BEES]) as unknown as BeeId[];
   const slots = {} as Record<BeeId, SlotProfile>;
-  BEES.forEach((id, i) => {
-    const b = settings?.bees[i];
-    const style = b?.style ?? DEFAULT_SLOTS[id];
-    slots[id] = b
+  beeIds.forEach((id) => {
+    const legacyIndex = (BEES as readonly string[]).indexOf(id);
+    const configured = activeProfiles?.find((p) => p.id === id);
+    const b = legacyIndex >= 0 ? settings?.bees[legacyIndex] : undefined;
+    const style = configured?.style ?? b?.style ?? (DEFAULT_SLOTS as Record<string, StyleId>)[id]!;
+    slots[id] = configured
+      ? { style, name: configured.name, tagline: b?.tagline ?? STYLE_INFO[style].tagline, customImage: legacyIndex >= 0 && !!b?.image, rules: "", instructions: configured.rules, coins: configured.coins, fromSetup: false }
+      : b
       ? { style, name: b.name, tagline: b.tagline, customImage: b.image, rules: b.rules, coins: b.coins, fromSetup: true }
       : { style, name: STYLE_INFO[style].name, tagline: STYLE_INFO[style].tagline, customImage: false, rules: "", coins: [], fromSetup: false };
   });
@@ -334,6 +351,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, settings: Setti
 
   return {
     mode,
+    beeIds,
     slots,
     openai: { textModel: e.OPENAI_TEXT_MODEL, imageModel: e.OPENAI_IMAGE_MODEL },
     links: { sponsor: e.HOST_LINK, code: e.REPO_LINK },

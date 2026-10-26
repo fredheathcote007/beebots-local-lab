@@ -26,6 +26,7 @@
     "parity": "tsx src/tools/parity-market.ts",
     "e2e:fake-jev": "tsx test/e2e-dry.harness.ts",
     "effective-config": "tsx src/tools/effective-config.ts",
+    "owner:bees": "tsx src/tools/owner-bees.ts",
     "demo:roundtrip": "tsx --env-file-if-exists=.env src/tools/demo-roundtrip.ts",
     "demo:close": "tsx --env-file-if-exists=.env src/tools/demo-close.ts"
   },
