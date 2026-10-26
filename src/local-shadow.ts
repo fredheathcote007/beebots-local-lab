@@ -25,12 +25,13 @@ export interface ShadowRecord extends ShadowAsk {
   reason?: "paused" | "paced" | "circuit" | "busy"; latencyMs: number;
 }
 export type ShadowFetch = typeof fetch;
+interface QueuedShadowAsk { ask: ShadowAsk; submittedAt: number }
 
 export class LocalShadow {
   private lastCall = new Map<string, number>();
   private active = 0;
-  private queue: ShadowAsk[] = [];
-  private queued = new Map<string, ShadowAsk>();
+  private queue: QueuedShadowAsk[] = [];
+  private queued = new Map<string, QueuedShadowAsk>();
   private wakeTimer: ReturnType<typeof setTimeout> | undefined;
   private circuitUntil = 0;
   private failures = 0;
@@ -62,12 +63,14 @@ export class LocalShadow {
     const existing = this.queued.get(ask.bee);
     if (existing) {
       // Keep its FIFO place while refreshing state to the newest market snapshot.
+      const refreshed = { ask, submittedAt: this.now() };
       const index = this.queue.indexOf(existing);
-      this.queued.set(ask.bee, ask);
-      if (index >= 0) this.queue[index] = ask;
+      this.queued.set(ask.bee, refreshed);
+      if (index >= 0) this.queue[index] = refreshed;
     } else if (this.queue.length < 16) {
-      this.queued.set(ask.bee, ask);
-      this.queue.push(ask);
+      const entry = { ask, submittedAt: this.now() };
+      this.queued.set(ask.bee, entry);
+      this.queue.push(entry);
     } else {
       this.skipped(ask, "busy");
       return;
@@ -86,8 +89,8 @@ export class LocalShadow {
     const interval = Math.max(LOCAL_SHADOW_CONFIG.minIntervalMs, this.opts.minIntervalMs ?? 0);
     while (this.active < LOCAL_SHADOW_CONFIG.maxConcurrent && this.queue.length) {
       const now = this.now();
-      const eligibleAt = (ask: ShadowAsk) => Math.max(this.lastCall.get(ask.bee) ?? Number.NEGATIVE_INFINITY, now - interval) + interval;
-      const index = this.queue.findIndex((ask) => {
+      const eligibleAt = ({ ask }: QueuedShadowAsk) => Math.max(this.lastCall.get(ask.bee) ?? Number.NEGATIVE_INFINITY, now - interval) + interval;
+      const index = this.queue.findIndex(({ ask }) => {
         const prev = this.lastCall.get(ask.bee);
         return prev === undefined || now - prev >= interval;
       });
@@ -98,10 +101,12 @@ export class LocalShadow {
         this.wakeTimer.unref?.();
         return;
       }
-      const [ask] = this.queue.splice(index, 1);
-      if (!ask) continue;
+      const [entry] = this.queue.splice(index, 1);
+      if (!entry) continue;
+      const { ask } = entry;
       this.queued.delete(ask.bee);
-      if (ask.marketTs <= 0 || ask.marketTs > ask.ts || ask.ts - ask.marketTs > (this.opts.maxMarketAgeMs ?? 180_000)) {
+      const elapsedWaitingMs = Math.max(0, now - entry.submittedAt);
+      if (ask.marketTs <= 0 || ask.marketTs > ask.ts || ask.ts - ask.marketTs + elapsedWaitingMs > (this.opts.maxMarketAgeMs ?? 180_000)) {
         if (this.allowCoverage(ask.bee, "stale")) this.record({ ...ask, model: LOCAL_SHADOW_MODEL, choice: null, probabilities: null, status: "stale", latencyMs: 0 });
       } else this.dispatch(ask);
     }
@@ -141,8 +146,13 @@ export class LocalShadow {
     try {
       const res = await (this.opts.fetchFn ?? fetch)(LOCAL_SYSTEM_ONE_URL, {
         method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(req),
+        redirect: "error",
         signal: AbortSignal.timeout(this.opts.timeoutMs ?? 12_000),
       });
+      if (res.redirected || (res.status >= 300 && res.status < 400)) {
+        status = "rejected";
+        throw Object.assign(new Error("local endpoint redirect rejected"), { silent: true });
+      }
       if (!res.ok) {
         status = res.status >= 500 ? "unavailable" : "rejected";
         countsTowardCircuit = res.status >= 500;

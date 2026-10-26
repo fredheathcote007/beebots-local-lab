@@ -28,18 +28,32 @@ const recordedAsk: ShadowAsk = { ...ask, menu: {
 
 describe("local System One shadow", () => {
   it("POSTs native System One semantics to the fixed loopback endpoint and records distribution + baseline", async () => {
-    let sentUrl = ""; let sent: Record<string, unknown> = {}; let sentHeaders: Record<string, string> | undefined;
+    let sentUrl = ""; let sent: Record<string, unknown> = {}; let sentHeaders: Record<string, string> | undefined; let redirect: string | undefined;
     const rows: ShadowRecord[] = [];
-    const shadow = new LocalShadow({ enabled: true, minIntervalMs: 0, fetchFn: (async (url: string, init: RequestInit) => { sentUrl = url; sentHeaders = init.headers as Record<string, string>; sent = JSON.parse(String(init.body)); return response(good); }) as unknown as typeof fetch, onRecord: (r) => rows.push(r) });
+    const shadow = new LocalShadow({ enabled: true, minIntervalMs: 0, fetchFn: (async (url: string, init: RequestInit) => { sentUrl = url; sentHeaders = init.headers as Record<string, string>; redirect = init.redirect; sent = JSON.parse(String(init.body)); return response(good); }) as unknown as typeof fetch, onRecord: (r) => rows.push(r) });
     shadow.submit(ask);
     await new Promise((r) => setTimeout(r, 0));
     expect(sentUrl).toBe(LOCAL_SYSTEM_ONE_URL);
     expect(sentHeaders).toEqual({ "content-type": "application/json" });
+    expect(redirect).toBe("error");
     expect(sent).toMatchObject({ model: LOCAL_SHADOW_MODEL, state: ask.state, questions: {
       action: { type: "choice", instructions: "test strategy Pick your next move.", criteria: { WAIT: "hold", OPEN: "open" } },
       conviction: { type: "score", instructions: "Signal strength?", criteria: ["low", "medium", "high"] },
     } });
     expect(rows[0]).toMatchObject({ status: "ok", model: LOCAL_SHADOW_MODEL, choice: "OPEN", probabilities: { WAIT: 0.25, OPEN: 0.75 }, baselineChoice: "WAIT", marketTs: 900 });
+  });
+
+  it("rejects redirect responses without accepting their body as a model choice", async () => {
+    let redirect: string | undefined;
+    const rows: ShadowRecord[] = [];
+    const shadow = new LocalShadow({ enabled: true, minIntervalMs: 0, fetchFn: (async (_url: string, init: RequestInit) => {
+      redirect = init.redirect;
+      return response(good, 302);
+    }) as unknown as typeof fetch, onRecord: (r) => rows.push(r) });
+    shadow.submit(ask);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(redirect).toBe("error");
+    expect(rows[0]).toMatchObject({ status: "rejected", choice: null, probabilities: null });
   });
 
   it("accepts the recorded Decider-4B v2.1 action contract and ignores action confidence", async () => {
@@ -175,6 +189,28 @@ describe("local System One shadow", () => {
     await new Promise((r) => setTimeout(r, 10));
     expect(started).toEqual(["bee1", "bee2", "bee3", "bee_extra"]);
     expect(rows.find((r) => r.bee === "bee_extra" && r.status === "ok")).toMatchObject({ bee: "bee_extra", baselineChoice: "base:bee_extra", status: "ok" });
+  });
+
+  it("records a queued snapshot as stale when it expires before dispatch", async () => {
+    let now = 10_000;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const started: string[] = [];
+    const rows: ShadowRecord[] = [];
+    const shadow = new LocalShadow({ enabled: true, now: () => now, maxMarketAgeMs: 200, fetchFn: (async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)) as { state: { bee?: string } };
+      started.push(body.state.bee!);
+      await gate;
+      return response(good);
+    }) as typeof fetch, onRecord: (r) => rows.push(r) });
+    for (const bee of ["bee1", "bee2", "bee3"]) shadow.submit({ ...ask, bee, state: { bee } });
+    shadow.submit({ ...ask, bee: "bee4", state: { bee: "bee4" } });
+    expect(started).toEqual(["bee1", "bee2", "bee3"]);
+    now += 101; // Original snapshot age (100ms) plus queue wait now exceeds 200ms.
+    release();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(started).toEqual(["bee1", "bee2", "bee3"]);
+    expect(rows.find((r) => r.bee === "bee4" && r.status === "stale")).toMatchObject({ status: "stale", choice: null, probabilities: null });
   });
 
   it("wires shadow at multi-option engine decisions without changing paper decisions or orders", async () => {
