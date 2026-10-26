@@ -1,7 +1,8 @@
 import { createRequire } from "node:module";
 import type * as SDK from "@typesafe-ai/sdk" with { "resolution-mode": "require" };
 import type { Menu } from "./bees/types.js";
-import { LOCAL_SHADOW_RUNTIME } from "./config.js";
+import { LOCAL_SHADOW_RUNTIME, type LocalShadowTransport } from "./config.js";
+import { SHADOW_MAX_REQUEST_BYTES, SHADOW_MAX_RESPONSE_BYTES, SHADOW_TIMEOUT_MS, shadowFetch } from "./local-shadow-transport.js";
 
 const require = createRequire(import.meta.url);
 const { choice, score } = require("@typesafe-ai/sdk") as typeof SDK;
@@ -12,6 +13,9 @@ export const LOCAL_SHADOW_CONFIG = Object.freeze({
   model: LOCAL_SHADOW_RUNTIME.model,
   maxConcurrent: 3,
   minIntervalMs: 60_000,
+  maxRequestBytes: SHADOW_MAX_REQUEST_BYTES,
+  maxResponseBytes: SHADOW_MAX_RESPONSE_BYTES,
+  timeoutMs: SHADOW_TIMEOUT_MS,
 });
 export const LOCAL_SYSTEM_ONE_URL = LOCAL_SHADOW_CONFIG.url;
 export const LOCAL_SHADOW_MODEL = LOCAL_SHADOW_CONFIG.model;
@@ -27,6 +31,26 @@ export interface ShadowRecord extends ShadowAsk {
 export type ShadowFetch = typeof fetch;
 interface QueuedShadowAsk { ask: ShadowAsk; submittedAt: number }
 
+async function readBoundedText(response: Response, maxBytes: number): Promise<string> {
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxBytes) {
+        await reader.cancel();
+        throw Object.assign(new Error("shadow response exceeds size limit"), { silent: true });
+      }
+      chunks.push(value);
+    }
+  } finally { reader.releaseLock(); }
+  return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)), size).toString("utf8");
+}
+
 export class LocalShadow {
   private lastCall = new Map<string, number>();
   private active = 0;
@@ -37,7 +61,7 @@ export class LocalShadow {
   private failures = 0;
   private lastSkip = new Map<string, number>();
   private now: () => number;
-  constructor(private opts: { enabled: boolean; fetchFn?: ShadowFetch; now?: () => number; timeoutMs?: number; minIntervalMs?: number; maxMarketAgeMs?: number; onRecord: (row: ShadowRecord) => void }) {
+  constructor(private opts: { enabled: boolean; transport?: LocalShadowTransport; fetchFn?: ShadowFetch; now?: () => number; timeoutMs?: number; minIntervalMs?: number; maxMarketAgeMs?: number; onRecord: (row: ShadowRecord) => void }) {
     this.now = opts.now ?? Date.now;
   }
   /** Bounded coverage marker for engine states where a bee is intentionally not asked to decide. */
@@ -144,11 +168,15 @@ export class LocalShadow {
     let picked: string | null = null;
     let probabilities: Record<string, number> | null = null;
     try {
-      const res = await (this.opts.fetchFn ?? fetch)(LOCAL_SYSTEM_ONE_URL, {
-        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(req),
+      const body = JSON.stringify(req);
+      if (Buffer.byteLength(body) > LOCAL_SHADOW_CONFIG.maxRequestBytes) throw new Error("shadow request exceeds size limit");
+      const init: RequestInit = {
+        method: "POST", headers: { "content-type": "application/json" }, body,
         redirect: "error",
-        signal: AbortSignal.timeout(this.opts.timeoutMs ?? 12_000),
-      });
+        signal: AbortSignal.timeout(this.opts.timeoutMs ?? LOCAL_SHADOW_CONFIG.timeoutMs),
+      };
+      const fetcher = this.opts.fetchFn ?? ((url, options = init) => shadowFetch(this.opts.transport ?? "host-loopback", String(url), options, this.opts.timeoutMs ?? LOCAL_SHADOW_CONFIG.timeoutMs));
+      const res = await fetcher(LOCAL_SYSTEM_ONE_URL, init);
       if (res.redirected || (res.status >= 300 && res.status < 400)) {
         status = "rejected";
         throw Object.assign(new Error("local endpoint redirect rejected"), { silent: true });
@@ -160,7 +188,8 @@ export class LocalShadow {
       }
       // Once an HTTP response arrives, body parse/schema failures are contract rejections, not transport faults.
       status = "rejected";
-      const data = await res.json() as { model?: unknown; answers?: { action?: { choice?: unknown; probabilities?: unknown } } };
+      const responseText = await readBoundedText(res, LOCAL_SHADOW_CONFIG.maxResponseBytes);
+      const data = JSON.parse(responseText) as { model?: unknown; answers?: { action?: { choice?: unknown; probabilities?: unknown } } };
       if (data.model !== expectedModel || !data.answers?.action || typeof data.answers.action.choice !== "string" || !labels.includes(data.answers.action.choice)) { status = "rejected"; throw Object.assign(new Error("invalid local model response"), { silent: true }); }
       const raw = data.answers.action.probabilities;
       if (!raw || typeof raw !== "object" || Array.isArray(raw)) { status = "rejected"; throw Object.assign(new Error("invalid probability distribution"), { silent: true }); }

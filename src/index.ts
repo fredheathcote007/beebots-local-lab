@@ -93,7 +93,7 @@ async function main() {
   // Today's chooser spend survives a restart: the decisions' recorded cost, or the reservation ledger (which also holds
   // calls a restart cut off, at their worst case), whichever is higher.
   const jev = new Jev({ ...cfg.jev, spentTodayUsd: Math.max(db.jevSpendSince(startOfDay), db.chooserSpendSince(startOfDay)), ledger: db });
-  const shadow = new LocalShadow({ enabled: cfg.localShadow.enabled, maxMarketAgeMs: 3 * cfg.dataRefreshMs + 30_000, onRecord: (row) => {
+  const shadow = new LocalShadow({ enabled: cfg.localShadow.enabled, transport: cfg.localShadow.transport, maxMarketAgeMs: 3 * cfg.dataRefreshMs + 30_000, onRecord: (row) => {
     db.insertShadowDecision({ bee: row.bee, ts: row.ts, marketTs: row.marketTs, model: row.model, choice: row.choice, probabilities: row.probabilities, baselineChoice: row.baselineChoice, status: row.status, reason: row.reason, latencyMs: row.latencyMs });
     log.info("local shadow outcome", { bee: row.bee, status: row.status, ...(row.reason ? { reason: row.reason } : {}), latencyMs: row.latencyMs });
   } });

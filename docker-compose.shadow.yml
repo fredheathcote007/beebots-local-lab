@@ -1,0 +1,14 @@
+# Opt-in local Decider shadow transport. Requires the host relay to be started separately.
+# Apply with: docker compose -f docker-compose.yml -f docker-compose.shadow.yml config
+services:
+  engine:
+    environment:
+      LOCAL_SHADOW_ENABLED: "true"
+      LOCAL_SHADOW_TRANSPORT: unix-socket
+    volumes:
+      - type: bind
+        source: /run/user/1000/beebots-decider
+        target: /run/beebots-decider
+        read_only: true
+        bind:
+          create_host_path: false

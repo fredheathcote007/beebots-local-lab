@@ -56,6 +56,14 @@ describe("local System One shadow", () => {
     expect(rows[0]).toMatchObject({ status: "rejected", choice: null, probabilities: null });
   });
 
+  it("bounds response reads before parsing model output", async () => {
+    const rows: ShadowRecord[] = [];
+    const shadow = new LocalShadow({ enabled: true, minIntervalMs: 0, fetchFn: (async () => new Response("x".repeat(64 * 1024 + 1))) as typeof fetch, onRecord: (r) => rows.push(r) });
+    shadow.submit(ask);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(rows[0]).toMatchObject({ status: "rejected", choice: null, probabilities: null });
+  });
+
   it("accepts the recorded Decider-4B v2.1 action contract and ignores action confidence", async () => {
     const rows: ShadowRecord[] = [];
     const shadow = new LocalShadow({ enabled: true, minIntervalMs: 0, fetchFn: (async () => response(deciderFixture)) as typeof fetch, onRecord: (r) => rows.push(r) });
